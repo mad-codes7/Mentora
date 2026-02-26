@@ -1,15 +1,17 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import tutorRoutes from './routes/tutorRoutes';
 
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Health check route
 app.get('/api/health', (req: Request, res: Response) => {
@@ -19,6 +21,9 @@ app.get('/api/health', (req: Request, res: Response) => {
         timestamp: new Date().toISOString(),
     });
 });
+
+// Module routes
+app.use('/api/tutor', tutorRoutes);
 
 // Start server
 app.listen(PORT, () => {
