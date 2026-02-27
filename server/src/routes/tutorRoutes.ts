@@ -20,6 +20,9 @@ router.post('/sessions/:sessionId/upload', tutorController.uploadDocument);
 // Wallet
 router.get('/wallet/:uid', tutorController.getWallet);
 
+// Booking Requests
+router.get('/requests/:uid', tutorController.getBookingRequests);
+
 // Analytics
 router.get('/analytics/:uid', tutorController.getAnalytics);
 

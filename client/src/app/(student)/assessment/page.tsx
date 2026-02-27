@@ -7,7 +7,7 @@ import { collection, addDoc, doc, updateDoc, Timestamp } from 'firebase/firestor
 import { db } from '@/config/firebase';
 import { fetchQuizQuestions, QuizApiQuestion } from '@/config/mockQuizApi';
 import QuizCard from '@/features/student/QuizCard';
-import { FileText, Crosshair } from 'lucide-react';
+import { FileText, Crosshair, Video, CalendarDays } from 'lucide-react';
 
 function AssessmentContent() {
     const searchParams = useSearchParams();
@@ -214,16 +214,49 @@ function AssessmentContent() {
                                     : 'Keep going! You\'ll get better!'}
                         </p>
 
-                        {/* Pre-session: show Find Tutor button */}
+                        {/* Pre-session: show Connect Now + Book Slot options */}
                         {type === 'pre_session' && (
-                            <button
-                                onClick={() => router.push(
-                                    `/find-tutor?topic=${encodeURIComponent(topic)}&assessmentId=${savedAssessmentId}`
-                                )}
-                                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white/20 backdrop-blur-sm px-6 py-3 text-sm font-bold text-white shadow-lg hover:bg-white/30 transition-all hover:scale-105"
-                            >
-                                🎓 Find a Tutor
-                            </button>
+                            <div className="mt-6 space-y-3">
+                                <p className="text-sm font-medium text-indigo-100 text-center">
+                                    What would you like to do next?
+                                </p>
+                                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                                    <button
+                                        onClick={() => router.push(
+                                            `/find-tutor?topic=${encodeURIComponent(topic)}&assessmentId=${savedAssessmentId}&mode=connect`
+                                        )}
+                                        className="w-full sm:w-auto group relative overflow-hidden rounded-xl bg-white/20 backdrop-blur-sm px-6 py-4 text-left text-white shadow-lg transition-all hover:bg-white/30 hover:scale-105 hover:shadow-xl border border-white/10"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-400/30">
+                                                <Video className="h-5 w-5" />
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-sm">Connect with Tutor Now</p>
+                                                <p className="text-xs text-indigo-200">Instant 1-on-1 session</p>
+                                            </div>
+                                        </div>
+                                        <div className="absolute -right-2 -top-2 h-8 w-8 rounded-full bg-emerald-400/20 animate-ping" />
+                                    </button>
+
+                                    <button
+                                        onClick={() => router.push(
+                                            `/find-tutor?topic=${encodeURIComponent(topic)}&assessmentId=${savedAssessmentId}`
+                                        )}
+                                        className="w-full sm:w-auto group relative overflow-hidden rounded-xl bg-white/10 backdrop-blur-sm px-6 py-4 text-left text-white shadow-lg transition-all hover:bg-white/20 hover:scale-105 hover:shadow-xl border border-white/10"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-400/30">
+                                                <CalendarDays className="h-5 w-5" />
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-sm">Book a Slot</p>
+                                                <p className="text-xs text-indigo-200">Browse tutors & schedule</p>
+                                            </div>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
                         )}
 
                         {/* Post-session: show redirecting message */}

@@ -28,6 +28,7 @@ export default function TutorProfilePage() {
     const [hourlyRate, setHourlyRate] = useState(profile?.tutorData?.hourlyRate || 500);
     const [selectedSubjects, setSelectedSubjects] = useState<string[]>(profile?.tutorData?.subjects || []);
     const [availability, setAvailability] = useState<AvailabilitySlot[]>(profile?.tutorData?.availability || []);
+    const [qualification, setQualification] = useState(profile?.tutorData?.qualification || '');
 
     // Sync state when profile loads
     React.useEffect(() => {
@@ -37,6 +38,7 @@ export default function TutorProfilePage() {
             setHourlyRate(profile.tutorData.hourlyRate || 500);
             setSelectedSubjects(profile.tutorData.subjects || []);
             setAvailability(profile.tutorData.availability || []);
+            setQualification(profile.tutorData.qualification || '');
         }
     }, [profile]);
 
@@ -72,7 +74,7 @@ export default function TutorProfilePage() {
         try {
             setSaving(true);
             setMessage('');
-            await updateProfile({ subjects: selectedSubjects, availability, bio, experience, hourlyRate });
+            await updateProfile({ subjects: selectedSubjects, availability, bio, experience, hourlyRate, qualification });
             setMessage('Profile updated successfully!');
             setEditing(false);
         } catch {
@@ -141,6 +143,14 @@ export default function TutorProfilePage() {
                                 <input type="number" className="input-styled" min={100} max={5000} value={hourlyRate} onChange={(e) => setHourlyRate(Number(e.target.value))} />
                             ) : (
                                 <p className="text-2xl font-bold" style={{ color: 'var(--success)' }}>₹{hourlyRate}/hr</p>
+                            )}
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Qualification</label>
+                            {editing ? (
+                                <input type="text" className="input-styled" placeholder="e.g. B.Tech, M.Sc Physics" value={qualification} onChange={(e) => setQualification(e.target.value)} />
+                            ) : (
+                                <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{qualification || 'No qualification set'}</p>
                             )}
                         </div>
                     </div>

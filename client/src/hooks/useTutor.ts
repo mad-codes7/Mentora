@@ -59,6 +59,7 @@ export function useTutor() {
         experience: string;
         hourlyRate: number;
         verificationQuizScore: number;
+        qualification?: string;
     }) => {
         if (!firebaseUser) throw new Error('Not authenticated');
 
@@ -86,6 +87,7 @@ export function useTutor() {
         bio?: string;
         experience?: string;
         hourlyRate?: number;
+        qualification?: string;
     }) => {
         if (!firebaseUser) throw new Error('Not authenticated');
 

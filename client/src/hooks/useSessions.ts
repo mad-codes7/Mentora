@@ -26,6 +26,7 @@ export function useSessions() {
     const { firebaseUser } = useAuth();
     const [sessions, setSessions] = useState<TutorSessionItem[]>([]);
     const [availableSessions, setAvailableSessions] = useState<TutorSessionItem[]>([]);
+    const [bookingRequests, setBookingRequests] = useState<TutorSessionItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -64,10 +65,23 @@ export function useSessions() {
         }
     }, []);
 
+    const fetchBookingRequests = useCallback(async () => {
+        if (!firebaseUser) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/tutor/requests/${firebaseUser.uid}`);
+            if (!res.ok) throw new Error('Failed to fetch booking requests');
+            const { data } = await res.json();
+            setBookingRequests(data || []);
+        } catch {
+            // silent
+        }
+    }, [firebaseUser]);
+
     useEffect(() => {
         fetchSessions();
         fetchAvailableSessions();
-    }, [fetchSessions, fetchAvailableSessions]);
+        fetchBookingRequests();
+    }, [fetchSessions, fetchAvailableSessions, fetchBookingRequests]);
 
     const acceptSession = async (sessionId: string) => {
         if (!firebaseUser) throw new Error('Not authenticated');
@@ -107,5 +121,5 @@ export function useSessions() {
         return res.json();
     };
 
-    return { sessions, availableSessions, loading, error, fetchSessions, fetchAvailableSessions, acceptSession, updateSessionStatus, uploadDocument };
+    return { sessions, availableSessions, bookingRequests, loading, error, fetchSessions, fetchAvailableSessions, fetchBookingRequests, acceptSession, updateSessionStatus, uploadDocument };
 }

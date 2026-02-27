@@ -34,6 +34,7 @@ export interface TutorData {
     experience?: string;
     hourlyRate?: number;
     verificationQuizScore?: number;
+    qualification?: string;
 }
 
 export interface ParentData {
@@ -54,6 +55,7 @@ export interface MentoraUser {
 export type SessionStatus =
     | 'searching'
     | 'pending_payment'
+    | 'pending_tutor_approval'
     | 'paid_waiting'
     | 'in_progress'
     | 'completed'

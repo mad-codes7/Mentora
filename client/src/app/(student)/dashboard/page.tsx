@@ -6,7 +6,10 @@ import DoubtUpload from '@/features/student/DoubtUpload';
 import UpcomingSessions from '@/features/student/UpcomingSessions';
 import SessionHistory from '@/features/student/SessionHistory';
 import ProgressCharts from '@/features/student/ProgressCharts';
-import { BookOpen, Users, Star, Zap, BarChart3 } from 'lucide-react';
+import DashboardStats from '@/features/student/DashboardStats';
+import SubjectPerformance from '@/features/student/SubjectPerformance';
+import WeeklyActivity from '@/features/student/WeeklyActivity';
+import { BookOpen, Users, Star, Zap, BarChart3, Activity } from 'lucide-react';
 
 export default function StudentDashboard() {
     const { mentoraUser } = useAuth();
@@ -57,6 +60,11 @@ export default function StudentDashboard() {
                 </div>
             </div>
 
+            {/* ── Your Stats ── */}
+            <section>
+                <DashboardStats />
+            </section>
+
             {/* ── Quick Actions ── */}
             <section>
                 <div className="flex items-center gap-2 mb-4">
@@ -78,6 +86,18 @@ export default function StudentDashboard() {
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                     <UpcomingSessions />
                     <ProgressCharts />
+                </div>
+            </section>
+
+            {/* ── Analytics ── */}
+            <section>
+                <div className="flex items-center gap-2 mb-4">
+                    <Activity className="h-4 w-4 text-indigo-500" />
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Analytics</h2>
+                </div>
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <SubjectPerformance />
+                    <WeeklyActivity />
                 </div>
             </section>
 

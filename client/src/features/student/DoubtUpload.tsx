@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/common/AuthContext';
-import { Camera, Upload, X, Rocket } from 'lucide-react';
+import { analyzeDoubtImage } from '@/config/analyzeDoubtImage';
+import { Camera, Upload, X, Rocket, Sparkles, Loader2 } from 'lucide-react';
 
 const SUBJECT_TAGS = [
     { label: 'Algebra', color: 'bg-blue-50 text-blue-600 border-blue-200' },
@@ -64,6 +65,46 @@ export default function DoubtUpload() {
     const [uploading, setUploading] = useState(false);
     const [dragOver, setDragOver] = useState(false);
 
+    // AI analysis state
+    const [analyzing, setAnalyzing] = useState(false);
+    const [aiSuggested, setAiSuggested] = useState(false);
+    const [userEditedTags, setUserEditedTags] = useState(false);
+    const [userEditedDesc, setUserEditedDesc] = useState(false);
+
+    // Trigger AI analysis when an image is uploaded
+    useEffect(() => {
+        if (!imagePreview) return;
+        let cancelled = false;
+
+        const runAnalysis = async () => {
+            setAnalyzing(true);
+            try {
+                const result = await analyzeDoubtImage(imagePreview);
+                if (cancelled) return;
+
+                // Auto-fill tags only if user hasn't manually selected any
+                if (!userEditedTags && result.tags.length > 0) {
+                    setSelectedTags(result.tags);
+                }
+                // Auto-fill description only if user hasn't manually typed anything
+                if (!userEditedDesc && result.description) {
+                    setDescription(result.description);
+                }
+                if (result.tags.length > 0 || result.description) {
+                    setAiSuggested(true);
+                }
+            } catch (err) {
+                console.warn('AI analysis failed:', err);
+            } finally {
+                if (!cancelled) setAnalyzing(false);
+            }
+        };
+
+        runAnalysis();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [imagePreview]);
+
     const handleFileSelect = (file: File) => {
         if (!file.type.startsWith('image/')) return;
         if (file.size > 5 * 1024 * 1024) {
@@ -71,6 +112,9 @@ export default function DoubtUpload() {
             return;
         }
         setImageFile(file);
+        setAiSuggested(false);
+        setUserEditedTags(false);
+        setUserEditedDesc(false);
         const reader = new FileReader();
         reader.onloadend = () => setImagePreview(reader.result as string);
         reader.readAsDataURL(file);
@@ -89,6 +133,7 @@ export default function DoubtUpload() {
     };
 
     const toggleTag = (tag: string) => {
+        setUserEditedTags(true);
         setSelectedTags((prev) =>
             prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
         );
@@ -97,6 +142,12 @@ export default function DoubtUpload() {
     const removeImage = () => {
         setImageFile(null);
         setImagePreview(null);
+        setAiSuggested(false);
+        setAnalyzing(false);
+        setSelectedTags([]);
+        setDescription('');
+        setUserEditedTags(false);
+        setUserEditedDesc(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
@@ -107,11 +158,29 @@ export default function DoubtUpload() {
         try {
             const compressedBase64 = await compressImage(imageFile);
 
+            // If user didn't select tags or describe, run AI analysis one more time as fallback
+            let finalTags = selectedTags;
+            let finalDescription = description.trim();
+
+            if (finalTags.length === 0 || !finalDescription) {
+                try {
+                    const result = await analyzeDoubtImage(compressedBase64);
+                    if (finalTags.length === 0 && result.tags.length > 0) {
+                        finalTags = result.tags;
+                    }
+                    if (!finalDescription && result.description) {
+                        finalDescription = result.description;
+                    }
+                } catch {
+                    // Proceed without AI tags — not a blocker
+                }
+            }
+
             const doubtData = {
                 studentId: firebaseUser.uid,
                 imageUrl: compressedBase64,
-                description: description.trim(),
-                tags: selectedTags,
+                description: finalDescription,
+                tags: finalTags,
                 status: 'open',
                 matchedTutorId: null,
                 sessionId: null,
@@ -120,8 +189,8 @@ export default function DoubtUpload() {
 
             await addDoc(collection(db, 'doubts'), doubtData);
 
-            const tagParams = selectedTags.length > 0
-                ? `?tags=${encodeURIComponent(selectedTags.join(','))}`
+            const tagParams = finalTags.length > 0
+                ? `?tags=${encodeURIComponent(finalTags.join(','))}`
                 : '';
             router.push(`/find-tutor${tagParams}`);
         } catch (error) {
@@ -140,10 +209,10 @@ export default function DoubtUpload() {
                 </div>
                 <div>
                     <h3 className="text-lg font-bold text-slate-900">
-                        Upload a Doubt
+                        Instant Doubt
                     </h3>
                     <p className="text-sm text-slate-400">
-                        Snap a photo and get instant help
+                        Snap a photo — AI detects the subject instantly
                     </p>
                 </div>
             </div>
@@ -197,13 +266,35 @@ export default function DoubtUpload() {
             {/* Description + Tags (show after image) */}
             {imagePreview && (
                 <div className="animate-fade-in-up">
+                    {/* AI Analysis Status */}
+                    {analyzing && (
+                        <div className="flex items-center gap-2 rounded-xl bg-indigo-50 border border-indigo-100 px-4 py-2.5 mb-4">
+                            <Loader2 className="h-4 w-4 text-indigo-500 animate-spin" />
+                            <span className="text-sm font-medium text-indigo-600">
+                                AI is analyzing your doubt...
+                            </span>
+                        </div>
+                    )}
+
+                    {aiSuggested && !analyzing && (
+                        <div className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2.5 mb-4">
+                            <Sparkles className="h-4 w-4 text-emerald-500" />
+                            <span className="text-sm font-medium text-emerald-600">
+                                AI auto-detected subject & description
+                            </span>
+                        </div>
+                    )}
+
                     <div className="mt-4">
                         <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                            Describe your doubt <span className="text-slate-400 font-normal">(optional)</span>
+                            Describe your doubt <span className="text-slate-400 font-normal">(optional — AI fills if blank)</span>
                         </label>
                         <textarea
                             value={description}
-                            onChange={(e) => setDescription(e.target.value)}
+                            onChange={(e) => {
+                                setDescription(e.target.value);
+                                setUserEditedDesc(true);
+                            }}
                             rows={2}
                             placeholder="e.g. I'm stuck on question 5, can't figure out the integral..."
                             className="input-styled resize-none text-sm"
@@ -213,7 +304,7 @@ export default function DoubtUpload() {
                     {/* Subject Tags */}
                     <div className="mt-4">
                         <label className="mb-2 block text-sm font-semibold text-slate-700">
-                            Subject tags <span className="text-slate-400 font-normal">(helps find the right tutor)</span>
+                            Subject tags <span className="text-slate-400 font-normal">(auto-detected or pick manually)</span>
                         </label>
                         <div className="flex flex-wrap gap-2">
                             {SUBJECT_TAGS.map((tag) => (

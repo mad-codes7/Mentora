@@ -2,9 +2,19 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/common/AuthContext';
-import { BarChart3, Inbox } from 'lucide-react';
+import { BarChart3, Star, TrendingUp, Users, CheckCircle, MessageSquare } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000';
+
+interface RecentRating {
+    ratingId: string;
+    studentId: string;
+    sessionId: string;
+    starRating: number;
+    feedback: string;
+    scoreDelta: number;
+    createdAt: string;
+}
 
 interface AnalyticsData {
     totalSessions: number;
@@ -15,6 +25,8 @@ interface AnalyticsData {
     ratingDistribution: { [key: number]: number };
     subjectBreakdown: { subject: string; count: number }[];
     monthlySessionTrend: { month: string; count: number }[];
+    recentRatings: RecentRating[];
+    completionRate: number;
 }
 
 export default function TutorAnalyticsPage() {
@@ -56,6 +68,15 @@ export default function TutorAnalyticsPage() {
         ? Math.max(...analytics.monthlySessionTrend.map((m) => m.count), 1)
         : 1;
 
+    const renderStars = (rating: number) => {
+        return Array.from({ length: 5 }, (_, i) => (
+            <Star
+                key={i}
+                className={`h-4 w-4 ${i < Math.round(rating) ? 'text-amber-400 fill-amber-400' : 'text-slate-200'}`}
+            />
+        ));
+    };
+
     return (
         <div className="max-w-6xl animate-fade-in-up">
             <div className="flex items-center gap-3 mb-8">
@@ -69,7 +90,7 @@ export default function TutorAnalyticsPage() {
             </div>
 
             {/* Top Stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8 stagger-children">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8 stagger-children">
                 <div className="stat-card">
                     <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>Total Sessions</p>
                     <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -95,9 +116,15 @@ export default function TutorAnalyticsPage() {
                     </p>
                 </div>
                 <div className="stat-card">
-                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>Avg Score Delta</p>
+                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>Score Delta</p>
                     <p className="text-2xl font-bold" style={{ color: 'var(--success)' }}>
                         +{((analytics?.averageScoreDelta || 0) * 100).toFixed(0)}%
+                    </p>
+                </div>
+                <div className="stat-card">
+                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>Completion Rate</p>
+                    <p className="text-2xl font-bold" style={{ color: 'var(--primary)' }}>
+                        {analytics?.completionRate || 0}%
                     </p>
                 </div>
             </div>
@@ -160,9 +187,65 @@ export default function TutorAnalyticsPage() {
                 </div>
             </div>
 
+            {/* Recent Reviews */}
+            <div className="card p-6 mb-6">
+                <div className="flex items-center gap-2 mb-4">
+                    <MessageSquare className="h-5 w-5 text-indigo-500" />
+                    <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Recent Student Reviews</h3>
+                </div>
+                {(!analytics?.recentRatings || analytics.recentRatings.length === 0) ? (
+                    <div className="text-center py-8">
+                        <p style={{ color: 'var(--text-muted)' }}>No reviews yet. Complete sessions to receive student feedback!</p>
+                    </div>
+                ) : (
+                    <div className="flex flex-col gap-3">
+                        {analytics.recentRatings.map((rating) => (
+                            <div
+                                key={rating.ratingId}
+                                className="p-4 rounded-xl border transition-all hover:shadow-sm"
+                                style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+                            >
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex gap-0.5">
+                                            {renderStars(rating.starRating)}
+                                        </div>
+                                        <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                            {rating.starRating.toFixed(1)}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {rating.scoreDelta !== 0 && (
+                                            <span className={`flex items-center gap-0.5 text-xs font-medium px-2 py-0.5 rounded-full ${rating.scoreDelta > 0
+                                                    ? 'bg-emerald-50 text-emerald-600'
+                                                    : 'bg-red-50 text-red-500'
+                                                }`}>
+                                                <TrendingUp className="h-3 w-3" />
+                                                {rating.scoreDelta > 0 ? '+' : ''}{(rating.scoreDelta * 100).toFixed(0)}%
+                                            </span>
+                                        )}
+                                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                                            {rating.createdAt ? new Date(rating.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }) : ''}
+                                        </span>
+                                    </div>
+                                </div>
+                                {rating.feedback && (
+                                    <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                        &ldquo;{rating.feedback}&rdquo;
+                                    </p>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
             {/* Subject Breakdown */}
             <div className="card p-6">
-                <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>Subject Breakdown</h3>
+                <div className="flex items-center gap-2 mb-4">
+                    <CheckCircle className="h-5 w-5 text-emerald-500" />
+                    <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Subject Breakdown</h3>
+                </div>
                 {(!analytics?.subjectBreakdown || analytics.subjectBreakdown.length === 0) ? (
                     <div className="text-center py-8">
                         <p style={{ color: 'var(--text-muted)' }}>No subject data yet</p>

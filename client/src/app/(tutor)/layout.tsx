@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/common/AuthContext';
 import { useState } from 'react';
-import { LayoutDashboard, User, BookOpen, Wallet, BarChart3, LogOut, ArrowLeftRight } from 'lucide-react';
+import { LayoutDashboard, User, BookOpen, Wallet, BarChart3, LogOut, ArrowLeftRight, Bell } from 'lucide-react';
 import TutorNotificationProvider, { useTutorNotifications } from '@/features/tutor/TutorNotificationProvider';
 
 const navItems = [
     { href: '/tutor', label: 'Dashboard', icon: LayoutDashboard },
     { href: '/tutor/sessions', label: 'Sessions', icon: BookOpen },
+    { href: '/tutor/requests', label: 'Requests', icon: Bell },
     { href: '/tutor/profile', label: 'Profile', icon: User },
     { href: '/tutor/wallet', label: 'Wallet', icon: Wallet },
     { href: '/tutor/analytics', label: 'Analytics', icon: BarChart3 },

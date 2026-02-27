@@ -87,8 +87,14 @@ export default function PostSessionPage({
             }
 
             const scoreDelta = postTestScore - preTestScore;
-            const normalizedDelta = Math.max(0, Math.min(5, (scoreDelta + 5) / 2));
-            const finalCalculatedRating = 0.6 * rating + 0.4 * normalizedDelta;
+            // If no assessments taken, rating is purely star-based
+            const hasAssessments = preTestScore > 0 || postTestScore > 0;
+            const normalizedDelta = hasAssessments
+                ? Math.max(0, Math.min(5, ((scoreDelta + 1) / 2) * 5))
+                : rating; // fallback to star rating if no assessments
+            const finalCalculatedRating = hasAssessments
+                ? 0.6 * rating + 0.4 * normalizedDelta
+                : rating;
 
             const ratingDoc = await addDoc(collection(db, 'ratings'), {
                 sessionId,
@@ -165,7 +171,7 @@ export default function PostSessionPage({
                 <p className="mt-2 text-slate-400 text-sm">How was your learning experience?</p>
             </div>
 
-            {/* Score Comparison */}
+            {/* Score Comparison — only shown if assessments were taken */}
             {(preScore || postScore) && (
                 <div className="card overflow-hidden mb-6">
                     <div className="bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-3">

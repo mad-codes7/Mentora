@@ -22,7 +22,7 @@ export default function UpcomingSessions() {
         const q = query(
             collection(db, 'sessions'),
             where('studentId', '==', firebaseUser.uid),
-            where('status', 'in', ['paid_waiting', 'pending_payment', 'searching'])
+            where('status', 'in', ['paid_waiting', 'pending_payment', 'searching', 'pending_tutor_approval'])
         );
 
         const unsubscribe = onSnapshot(
@@ -73,6 +73,7 @@ export default function UpcomingSessions() {
     const getStatusConfig = (status: string) => {
         const configs: Record<string, { bg: string; text: string; dot: string; label: string }> = {
             searching: { bg: 'bg-amber-50', text: 'text-amber-600', dot: 'bg-amber-400', label: 'Finding Tutor' },
+            pending_tutor_approval: { bg: 'bg-purple-50', text: 'text-purple-600', dot: 'bg-purple-400', label: 'Awaiting Tutor' },
             pending_payment: { bg: 'bg-orange-50', text: 'text-orange-600', dot: 'bg-orange-400', label: 'Awaiting Payment' },
             paid_waiting: { bg: 'bg-emerald-50', text: 'text-emerald-600', dot: 'bg-emerald-400', label: 'Ready to Join' },
         };
@@ -152,14 +153,23 @@ export default function UpcomingSessions() {
                                             Pay Now
                                         </button>
                                     )}
-                                    {session.status === 'paid_waiting' && (
-                                        <button
-                                            onClick={() => router.push(`/room/${session.sessionId}`)}
-                                            className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600 transition-colors animate-pulse"
-                                        >
-                                            Join Room
-                                        </button>
-                                    )}
+                                    {session.status === 'paid_waiting' && (() => {
+                                        // Check if it's time to join for scheduled sessions
+                                        const scheduled = session.scheduledStartTime?.toDate?.();
+                                        const isTimeToJoin = !scheduled || (Math.abs(Date.now() - scheduled.getTime()) < 5 * 60 * 1000 + 120 * 60 * 1000);
+                                        return isTimeToJoin ? (
+                                            <button
+                                                onClick={() => router.push(`/room/${session.sessionId}`)}
+                                                className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600 transition-colors animate-pulse"
+                                            >
+                                                Join Room
+                                            </button>
+                                        ) : (
+                                            <span className="text-sm font-bold text-indigo-600 min-w-[4rem] text-right">
+                                                {getTimeUntil(session.scheduledStartTime)}
+                                            </span>
+                                        );
+                                    })()}
                                     {session.status === 'searching' && (
                                         <span className="text-sm font-bold text-indigo-600 min-w-[4rem] text-right">
                                             {getTimeUntil(session.scheduledStartTime)}

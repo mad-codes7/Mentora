@@ -15,6 +15,13 @@ import {
 import { db } from '@/config/firebase';
 import { doTagsMatch } from '@/config/subjects';
 import TutorCard from '@/features/student/TutorCard';
+import { CalendarDays, WifiOff } from 'lucide-react';
+
+interface AvailabilitySlot {
+    day: string;
+    startTime: string;
+    endTime: string;
+}
 
 interface TutorInfo {
     uid: string;
@@ -23,6 +30,10 @@ interface TutorInfo {
     rating: number;
     price: number;
     isOnline: boolean;
+    isMatched: boolean;
+    matchedSubjects: string[];
+    availability: AvailabilitySlot[];
+    qualification?: string;
 }
 
 function FindTutorContent() {
@@ -30,6 +41,7 @@ function FindTutorContent() {
     const topic = searchParams.get('topic') || '';
     const assessmentId = searchParams.get('assessmentId') || '';
     const tagsParam = searchParams.get('tags') || '';
+    const mode = searchParams.get('mode') || ''; // 'connect' = online-only
     const doubtTags = tagsParam ? tagsParam.split(',') : [];
     const router = useRouter();
     const { firebaseUser } = useAuth();
@@ -39,6 +51,9 @@ function FindTutorContent() {
     const [booking, setBooking] = useState(false);
     const [bookingTutorId, setBookingTutorId] = useState<string | null>(null);
     const [searchSeconds, setSearchSeconds] = useState(0);
+
+    // All search tags = topic + doubt tags
+    const searchTags = [...(topic ? [topic] : []), ...doubtTags];
 
     const searchMessages = [
         'Scanning available tutors...',
@@ -79,32 +94,78 @@ function FindTutorContent() {
                     .filter((doc) => doc.id !== firebaseUser?.uid)
                     .map((doc) => {
                         const data = doc.data();
-                        const availability = data.tutorData?.availability || [];
+                        const availability: AvailabilitySlot[] = data.tutorData?.availability || [];
+                        const tutorSubjects: string[] = data.tutorData?.subjects || [];
 
                         // Check if tutor is available now
-                        // If no availability is set, consider them available (new tutors)
                         let isAvailableNow = availability.length === 0;
                         if (availability.length > 0) {
                             isAvailableNow = availability.some(
-                                (slot: { day: string; startTime: string; endTime: string }) =>
+                                (slot: AvailabilitySlot) =>
                                     slot.day === currentDay &&
                                     currentTime >= slot.startTime &&
                                     currentTime <= slot.endTime
                             );
                         }
 
+                        // Check subject match using doTagsMatch
+                        const matchedSubjects: string[] = [];
+                        if (searchTags.length > 0) {
+                            for (const tutorSubject of tutorSubjects) {
+                                for (const searchTag of searchTags) {
+                                    if (doTagsMatch(searchTag, tutorSubject)) {
+                                        if (!matchedSubjects.includes(tutorSubject)) {
+                                            matchedSubjects.push(tutorSubject);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         return {
                             uid: doc.id,
                             name: data.displayName || data.profile?.fullName || 'Tutor',
-                            subjects: data.tutorData?.subjects || [],
+                            subjects: tutorSubjects,
                             rating: data.tutorData?.aggregateRating || 4.0,
                             price: data.tutorData?.hourlyRate || data.tutorData?.sessionPrice || 200,
                             isOnline: isAvailableNow,
+                            isMatched: matchedSubjects.length > 0,
+                            matchedSubjects,
+                            availability,
+                            qualification: data.tutorData?.qualification || '',
                         };
-                    })
-                    .filter((tutor) => tutor.uid !== 'self'); // show all tutors for now
+                    });
 
-                setTutors(tutorList);
+                // Filter and sort tutors
+                let filteredTutors = tutorList;
+
+                // If in connect mode, show only online tutors
+                if (mode === 'connect') {
+                    filteredTutors = filteredTutors.filter(t => t.isOnline);
+                }
+
+                // Sort: subject match first, then rating descending
+                if (searchTags.length > 0) {
+                    const matched = filteredTutors.filter(t => t.isMatched);
+                    const unmatched = filteredTutors.filter(t => !t.isMatched);
+
+                    // Sort matched by rating descending
+                    matched.sort((a, b) => b.rating - a.rating);
+
+                    // Sort unmatched by rating descending
+                    unmatched.sort((a, b) => b.rating - a.rating);
+
+                    if (mode === 'connect' && matched.length > 0) {
+                        filteredTutors = matched;
+                    } else {
+                        filteredTutors = [...matched, ...unmatched];
+                    }
+                } else {
+                    // No search tags: sort by rating descending
+                    filteredTutors.sort((a, b) => b.rating - a.rating);
+                }
+
+                setTutors(filteredTutors);
             } catch (error) {
                 console.error('Error fetching tutors:', error);
             } finally {
@@ -113,6 +174,7 @@ function FindTutorContent() {
         };
 
         fetchTutors();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [firebaseUser]);
 
     const handleBookTutor = async (tutorId: string) => {
@@ -126,7 +188,6 @@ function FindTutorContent() {
         setBookingTutorId(tutorId);
 
         try {
-            // Generate a doc ref manually so we can use setDoc
             const sessionRef = doc(collection(db, 'sessions'));
             const sessionData = {
                 studentId: firebaseUser.uid,
@@ -148,7 +209,6 @@ function FindTutorContent() {
                 createdAt: Timestamp.now(),
             };
 
-            // Race against a 10s timeout — prevents silent hang from Firestore rules
             const timeout = new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error('Firestore write timed out')), 10000)
             );
@@ -164,18 +224,33 @@ function FindTutorContent() {
         }
     };
 
+    const handleRequestTutor = (tutorId: string) => {
+        // Navigate to schedule page with this specific tutor pre-selected
+        router.push(
+            `/schedule?topic=${encodeURIComponent(topic)}&assessmentId=${assessmentId}&tutorId=${tutorId}`
+        );
+    };
+
+    // Separate matched vs unmatched for display
+    const matchedTutors = tutors.filter(t => t.isMatched);
+    const unmatchedTutors = tutors.filter(t => !t.isMatched);
+
     return (
         <div className="space-y-6">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Find a Tutor</h1>
+                    <h1 className="text-2xl font-bold text-slate-900">
+                        {mode === 'connect' ? 'Connect with a Tutor' : 'Find a Tutor'}
+                    </h1>
                     <p className="mt-1 text-slate-500">
-                        {topic
-                            ? `Available tutors for "${topic}"`
-                            : doubtTags.length > 0
-                                ? 'Tutors matching your doubt'
-                                : 'Browse all available tutors'}
+                        {mode === 'connect'
+                            ? `Online tutors available for "${topic}"`
+                            : topic
+                                ? `Available tutors for "${topic}" — sorted by rating`
+                                : doubtTags.length > 0
+                                    ? 'Tutors matching your doubt'
+                                    : 'Browse all available tutors — sorted by rating'}
                     </p>
                     {doubtTags.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -204,27 +279,26 @@ function FindTutorContent() {
             {loading || (tutors.length === 0 && searchSeconds < 60) ? (
                 <div className="flex min-h-[40vh] items-center justify-center">
                     <div className="flex flex-col items-center gap-5 max-w-sm text-center">
-                        {/* Animated search icon */}
                         <div className="relative">
                             <div className="h-16 w-16 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center animate-pulse">
                                 <span className="text-3xl animate-bounce">🔍</span>
                             </div>
                             <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-emerald-400 border-2 border-white animate-ping" />
                         </div>
-
                         <div>
-                            <h3 className="text-lg font-bold text-slate-900">Finding the best tutor for you...</h3>
+                            <h3 className="text-lg font-bold text-slate-900">
+                                {mode === 'connect'
+                                    ? 'Finding online tutors for you...'
+                                    : 'Finding the best tutor for you...'}
+                            </h3>
                             <p className="mt-1 text-sm text-slate-500">{searchMessage}</p>
                         </div>
-
-                        {/* Progress bar */}
                         <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                             <div
                                 className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-1000 ease-linear"
                                 style={{ width: `${Math.min((searchSeconds / 60) * 100, 100)}%` }}
                             />
                         </div>
-
                         <p className="text-xs text-slate-400">
                             Checking availability & subject match... {60 - searchSeconds}s
                         </p>
@@ -233,50 +307,136 @@ function FindTutorContent() {
             ) : tutors.length === 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-white py-12 px-8 text-center shadow-sm">
                     <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 mb-5">
-                        <span className="text-3xl">😔</span>
+                        {mode === 'connect' ? (
+                            <WifiOff className="h-8 w-8 text-slate-300" />
+                        ) : (
+                            <span className="text-3xl">😔</span>
+                        )}
                     </div>
                     <h3 className="text-lg font-semibold text-slate-900">
-                        No tutors available right now
+                        {mode === 'connect'
+                            ? 'No tutors are online right now'
+                            : 'No tutors available right now'}
                     </h3>
                     <p className="mt-2 text-sm text-slate-500 max-w-md mx-auto">
-                        Don&apos;t worry! You can get AI-powered insights on your topic, or schedule a session for when a tutor is free.
+                        {mode === 'connect'
+                            ? 'All tutors for this subject are currently offline. You can book a slot and a matching tutor will be assigned to you.'
+                            : 'Don\'t worry! You can schedule a session for when a tutor is free.'}
                     </p>
                     <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
                         <button
                             onClick={() =>
-                                router.push(`/assessment?topic=${encodeURIComponent(topic)}&mode=ai-insight`)
+                                router.push(`/schedule?topic=${encodeURIComponent(topic)}&assessmentId=${assessmentId}`)
                             }
                             className="w-full sm:w-auto rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-3 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg hover:scale-105 flex items-center justify-center gap-2"
                         >
-                            <span>✨</span> Get AI Insight
+                            <CalendarDays className="h-4 w-4" />
+                            Book a Slot for Later
                         </button>
-                        <button
-                            onClick={() =>
-                                router.push(
-                                    `/schedule?topic=${encodeURIComponent(topic)}&assessmentId=${assessmentId}`
-                                )
-                            }
-                            className="w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition-all hover:bg-slate-50 hover:shadow-sm flex items-center justify-center gap-2"
-                        >
-                            <span>📅</span> Schedule for Later
-                        </button>
+                        {mode === 'connect' && (
+                            <button
+                                onClick={() =>
+                                    router.push(`/find-tutor?topic=${encodeURIComponent(topic)}&assessmentId=${assessmentId}`)
+                                }
+                                className="w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition-all hover:bg-slate-50 hover:shadow-sm flex items-center justify-center gap-2"
+                            >
+                                👀 View All Tutors
+                            </button>
+                        )}
                     </div>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {tutors.map((tutor) => (
-                        <TutorCard
-                            key={tutor.uid}
-                            tutorId={tutor.uid}
-                            name={tutor.name}
-                            subjects={tutor.subjects}
-                            rating={tutor.rating}
-                            price={tutor.price}
-                            isOnline={tutor.isOnline}
-                            onBook={handleBookTutor}
-                            isBooking={bookingTutorId === tutor.uid}
-                        />
-                    ))}
+                <div className="space-y-6">
+                    {/* Matched tutors section */}
+                    {searchTags.length > 0 && matchedTutors.length > 0 && (
+                        <div>
+                            <div className="flex items-center gap-2 mb-3">
+                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 text-xs">✓</span>
+                                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">
+                                    Best Matches for &ldquo;{topic || doubtTags.join(', ')}&rdquo;
+                                </h3>
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-600">
+                                    {matchedTutors.length}
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                {matchedTutors.map((tutor) => (
+                                    <TutorCard
+                                        key={tutor.uid}
+                                        tutorId={tutor.uid}
+                                        name={tutor.name}
+                                        subjects={tutor.subjects}
+                                        rating={tutor.rating}
+                                        price={tutor.price}
+                                        isOnline={tutor.isOnline}
+                                        onBook={handleBookTutor}
+                                        onRequest={handleRequestTutor}
+                                        isBooking={bookingTutorId === tutor.uid}
+                                        isMatched={true}
+                                        matchedSubjects={tutor.matchedSubjects}
+                                        availability={tutor.availability}
+                                        qualification={tutor.qualification}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Unmatched tutors section */}
+                    {unmatchedTutors.length > 0 && mode !== 'connect' && (
+                        <div>
+                            {matchedTutors.length > 0 && (
+                                <div className="flex items-center gap-2 mb-3 mt-2">
+                                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">
+                                        Other Tutors
+                                    </h3>
+                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
+                                        {unmatchedTutors.length}
+                                    </span>
+                                </div>
+                            )}
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                {unmatchedTutors.map((tutor) => (
+                                    <TutorCard
+                                        key={tutor.uid}
+                                        tutorId={tutor.uid}
+                                        name={tutor.name}
+                                        subjects={tutor.subjects}
+                                        rating={tutor.rating}
+                                        price={tutor.price}
+                                        isOnline={tutor.isOnline}
+                                        onBook={handleBookTutor}
+                                        onRequest={handleRequestTutor}
+                                        isBooking={bookingTutorId === tutor.uid}
+                                        availability={tutor.availability}
+                                        qualification={tutor.qualification}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Show only unmatched if no search tags */}
+                    {searchTags.length === 0 && (
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            {tutors.map((tutor) => (
+                                <TutorCard
+                                    key={tutor.uid}
+                                    tutorId={tutor.uid}
+                                    name={tutor.name}
+                                    subjects={tutor.subjects}
+                                    rating={tutor.rating}
+                                    price={tutor.price}
+                                    isOnline={tutor.isOnline}
+                                    onBook={handleBookTutor}
+                                    onRequest={handleRequestTutor}
+                                    isBooking={bookingTutorId === tutor.uid}
+                                    availability={tutor.availability}
+                                    qualification={tutor.qualification}
+                                />
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
         </div>

@@ -137,8 +137,14 @@ export default function RoomPage({ params }: RoomPageProps) {
             if (isTutor) {
                 router.push('/tutor/sessions');
             } else {
-                const topic = encodeURIComponent(currentTopic);
-                router.push(`/assessment?type=post_session&topic=${topic}&sessionId=${sessionId}`);
+                // Instant Doubt sessions (no pre-assessment) → skip quiz, go straight to rating
+                // Start Learning sessions (has pre-assessment) → take post-assessment first
+                if (session.preAssessmentId) {
+                    const topic = encodeURIComponent(currentTopic);
+                    router.push(`/assessment?type=post_session&topic=${topic}&sessionId=${sessionId}`);
+                } else {
+                    router.push(`/post-session/${sessionId}`);
+                }
             }
         }, 1000);
     }, [isCallEnded, session, isStudent, isTutor, notes, sessionId, router]);

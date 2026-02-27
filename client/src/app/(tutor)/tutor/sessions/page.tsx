@@ -7,6 +7,15 @@ import { BookOpen, Bell, Clock, CheckCircle, Inbox, Users, Video } from 'lucide-
 
 type TabFilter = 'all' | 'available' | 'searching' | 'in_progress' | 'completed';
 
+const isSessionTime = (scheduledTime?: string | null) => {
+    if (!scheduledTime) return true; // on-demand sessions can always be joined
+    const now = new Date();
+    const scheduled = new Date(scheduledTime);
+    const diffMs = now.getTime() - scheduled.getTime();
+    const diffMins = diffMs / (1000 * 60);
+    return diffMins >= -5 && diffMins <= 120;
+};
+
 export default function TutorSessionsPage() {
     const { sessions, availableSessions, loading, acceptSession, updateSessionStatus, fetchSessions, fetchAvailableSessions } = useSessions();
     const [activeTab, setActiveTab] = useState<TabFilter>('all');
@@ -47,6 +56,7 @@ export default function TutorSessionsPage() {
 
     const statusColors: Record<string, string> = {
         searching: 'badge-warning',
+        pending_tutor_approval: 'badge-warning',
         pending_payment: 'badge-info',
         paid_waiting: 'badge-info',
         in_progress: 'badge-success',
@@ -163,6 +173,11 @@ export default function TutorSessionsPage() {
                                     <div className="flex items-center gap-4 text-sm text-slate-500">
                                         <span className="flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {session.studentName || 'Student'}</span>
                                         <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {session.durationLimitMinutes} min</span>
+                                        {session.scheduledStartTime && (
+                                            <span className="flex items-center gap-1 text-indigo-600 font-medium">
+                                                📅 {new Date(session.scheduledStartTime).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                        )}
                                         <span>{new Date(session.createdAt).toLocaleDateString()}</span>
                                     </div>
                                 </div>
@@ -190,17 +205,22 @@ export default function TutorSessionsPage() {
                                             )}
                                         </>
                                     )}
-                                    {session.status === 'paid_waiting' && (
+                                    {session.status === 'paid_waiting' && isSessionTime(session.scheduledStartTime) && (
                                         <button
-                                            className="btn-primary text-sm"
+                                            className="btn-primary text-sm flex items-center gap-1"
                                             disabled={actionLoading === session.sessionId}
                                             onClick={async () => {
                                                 await handleStatusUpdate(session.sessionId, 'in_progress');
                                                 window.location.href = `/room/${session.sessionId}`;
                                             }}
                                         >
-                                            🎥 Join Room
+                                            <Video className="h-3.5 w-3.5" /> Join Session
                                         </button>
+                                    )}
+                                    {session.status === 'paid_waiting' && !isSessionTime(session.scheduledStartTime) && session.scheduledStartTime && (
+                                        <span className="text-xs text-indigo-500 font-medium px-3 py-2 rounded-lg bg-indigo-50">
+                                            ⏳ Starts {new Date(session.scheduledStartTime).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                        </span>
                                     )}
                                     {session.status === 'in_progress' && (
                                         <>
