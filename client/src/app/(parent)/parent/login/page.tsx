@@ -8,7 +8,7 @@ import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { MentoraUser } from '@/config/types';
 
-export default function LoginPage() {
+export default function ParentLoginPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -19,37 +19,39 @@ export default function LoginPage() {
     const redirectUser = async (uid: string, displayName?: string | null, userEmail?: string | null) => {
         const userDoc = await getDoc(doc(db, 'users', uid));
         if (!userDoc.exists()) {
-            // New user — create as student by default
+            // New user — create as parent
             const userData: Omit<MentoraUser, 'uid'> = {
-                roles: ['student'],
+                roles: ['parent'],
                 profile: {
-                    fullName: displayName || 'User',
+                    fullName: displayName || 'Parent',
                     email: userEmail || '',
                     createdAt: Timestamp.now(),
                 },
-                studentData: {
-                    classLevel: '',
-                    examFocus: [],
-                    linkedParentIds: [],
-                },
+                studentData: null,
                 tutorData: null,
-                parentData: null,
+                parentData: {
+                    linkedStudentIds: [],
+                },
             };
             await setDoc(doc(db, 'users', uid), userData);
             router.push('/profile-setup');
         } else {
             const data = userDoc.data();
-            const roles: string[] = data?.roles || ['student'];
+            const roles: string[] = data?.roles || [];
 
-            // Redirect based on role
-            if (roles.includes('tutor')) {
-                router.push('/tutor');
-            } else if (roles.includes('parent')) {
-                router.push('/parent');
-            } else if (!data?.studentData?.classLevel) {
+            if (!roles.includes('parent')) {
+                // Add parent role
+                await setDoc(doc(db, 'users', uid), {
+                    roles: [...roles, 'parent'],
+                    parentData: data?.parentData || { linkedStudentIds: [] },
+                }, { merge: true });
+            }
+
+            // Check if parent has linked students
+            if (!data?.parentData?.linkedStudentIds?.length && !roles.includes('parent')) {
                 router.push('/profile-setup');
             } else {
-                router.push('/dashboard');
+                router.push('/parent');
             }
         }
     };
@@ -98,8 +100,10 @@ export default function LoginPage() {
 
     return (
         <div className="flex min-h-screen">
-            {/* Left Side — Gradient Brand Panel */}
-            <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden gradient-hero items-center justify-center p-12">
+            {/* Left Side — Amber Brand Panel */}
+            <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden items-center justify-center p-12"
+                style={{ background: 'linear-gradient(135deg, #d97706 0%, #b45309 40%, #92400e 100%)' }}
+            >
                 {/* Decorative shapes */}
                 <div className="absolute top-20 left-10 w-32 h-32 rounded-full bg-white/10 animate-float" />
                 <div className="absolute bottom-24 right-16 w-48 h-48 rounded-3xl bg-white/5 rotate-12" />
@@ -111,26 +115,26 @@ export default function LoginPage() {
                         <span className="text-3xl font-bold">M</span>
                     </div>
                     <h2 className="text-4xl font-bold leading-tight">
-                        Learn from the best,<br />
-                        <span className="text-indigo-200">anytime, anywhere.</span>
+                        Stay connected to<br />
+                        <span className="text-amber-200">your child&apos;s learning.</span>
                     </h2>
-                    <p className="mt-4 text-indigo-200 text-lg leading-relaxed">
-                        Connect with expert tutors for personalized 1-on-1 live sessions.
-                        AI-powered assessments track your progress.
+                    <p className="mt-4 text-amber-200 text-lg leading-relaxed">
+                        Monitor your child&apos;s tutoring sessions, track their progress,
+                        and see how they&apos;re improving over time.
                     </p>
 
                     {/* Trust signals */}
                     <div className="mt-10 flex items-center gap-6">
                         <div className="flex -space-x-2">
-                            {['#818CF8', '#60A5FA', '#34D399', '#FBBF24'].map((color, i) => (
+                            {['#F59E0B', '#D97706', '#B45309', '#FBBF24'].map((color, i) => (
                                 <div key={i} className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white/30 text-xs font-bold text-white" style={{ backgroundColor: color }}>
-                                    {['A', 'B', 'C', 'D'][i]}
+                                    {['P', 'A', 'R', 'T'][i]}
                                 </div>
                             ))}
                         </div>
                         <div>
-                            <p className="text-sm font-bold text-white">10,000+ students</p>
-                            <p className="text-xs text-indigo-200">already learning on Mentora</p>
+                            <p className="text-sm font-bold text-white">Parents trust Mentora</p>
+                            <p className="text-xs text-amber-200">to track their child&apos;s progress</p>
                         </div>
                     </div>
                 </div>
@@ -142,16 +146,20 @@ export default function LoginPage() {
                     {/* Mobile Logo */}
                     <div className="mb-8 text-center lg:text-left">
                         <div className="flex items-center gap-2.5 justify-center lg:justify-start mb-6">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-primary text-white font-bold text-lg shadow-md">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white font-bold text-lg shadow-md"
+                                style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }}
+                            >
                                 M
                             </div>
-                            <span className="text-2xl font-bold gradient-text">Mentora</span>
+                            <span className="text-2xl font-bold" style={{ background: 'linear-gradient(135deg, #d97706, #b45309)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                                Mentora Parent
+                            </span>
                         </div>
                         <h1 className="text-3xl font-bold text-slate-900">
                             Welcome back
                         </h1>
                         <p className="mt-2 text-slate-400">
-                            Sign in to continue learning
+                            Sign in to your parent account
                         </p>
                     </div>
 
@@ -193,7 +201,8 @@ export default function LoginPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="btn-primary w-full text-sm text-center disabled:opacity-50"
+                            className="w-full rounded-xl px-6 py-3 text-sm font-bold text-white shadow-lg transition-all hover:shadow-xl hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100"
+                            style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }}
                         >
                             {loading ? 'Signing in...' : 'Sign In'}
                         </button>
@@ -225,10 +234,18 @@ export default function LoginPage() {
                     <p className="mt-8 text-center text-sm text-slate-400">
                         Don&apos;t have an account?{' '}
                         <Link
-                            href="/signup"
-                            className="font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
+                            href="/signup?role=parent"
+                            className="font-semibold transition-colors"
+                            style={{ color: '#d97706' }}
                         >
                             Sign Up
+                        </Link>
+                    </p>
+
+                    {/* Back to Home */}
+                    <p className="mt-3 text-center text-xs text-slate-400">
+                        <Link href="/" className="hover:underline">
+                            ← Back to Home
                         </Link>
                     </p>
                 </div>

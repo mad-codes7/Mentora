@@ -16,7 +16,7 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     useEffect(() => {
         if (!loading) {
             if (!firebaseUser) {
-                router.push('/login');
+                router.push('/');
                 return;
             }
             if (!mentoraUser) {
@@ -24,7 +24,8 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
                 return;
             }
             if (requiredRole && !mentoraUser.roles.includes(requiredRole)) {
-                router.push('/login');
+                // Wrong role — send to home so they can pick the right portal
+                router.push('/');
                 return;
             }
         }

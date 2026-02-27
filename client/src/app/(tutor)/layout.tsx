@@ -34,18 +34,16 @@ function TutorLayoutInner({ children }: { children: React.ReactNode }) {
     const [showDropdown, setShowDropdown] = useState(false);
 
     const isRegisterPage = pathname === '/tutor/register';
+    const isTutorAuthPage = pathname === '/tutor/login' || pathname === '/tutor/signup' || pathname === '/tutor/basic-info';
 
     useEffect(() => {
         if (loading) return;
-        if (!firebaseUser) {
-            router.push('/login');
-            return;
-        }
-        if (isRegisterPage) return;
+        if (!firebaseUser) return; // Show inline login prompt instead of redirect
+        if (isRegisterPage || isTutorAuthPage) return;
         if (!mentoraUser || !mentoraUser.roles.includes('tutor')) {
             router.push('/tutor/register');
         }
-    }, [firebaseUser, mentoraUser, loading, isRegisterPage, router]);
+    }, [firebaseUser, mentoraUser, loading, isRegisterPage, isTutorAuthPage, router]);
 
     if (loading) {
         return (
@@ -58,7 +56,46 @@ function TutorLayoutInner({ children }: { children: React.ReactNode }) {
         );
     }
 
-    if (!firebaseUser) return null;
+    if (isTutorAuthPage) {
+        return <>{children}</>;
+    }
+
+    if (!firebaseUser) {
+        return (
+            <div className="flex min-h-screen items-center justify-center hero-pattern" style={{ background: 'var(--bg)' }}>
+                <div className="max-w-md w-full px-6 text-center animate-fade-in-up">
+                    <span className="text-5xl block mb-4">🎓</span>
+                    <h1 className="text-3xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Tutor Portal</h1>
+                    <p className="text-sm mb-8" style={{ color: 'var(--text-secondary)' }}>
+                        Log in or sign up to start teaching on Mentora
+                    </p>
+                    <div className="flex gap-4 justify-center">
+                        <button
+                            onClick={() => router.push('/tutor/login')}
+                            className="rounded-xl px-8 py-3 text-sm font-bold text-white shadow-lg transition-all hover:scale-105"
+                            style={{ background: '#059669' }}
+                        >
+                            Log In
+                        </button>
+                        <button
+                            onClick={() => router.push('/tutor/signup')}
+                            className="rounded-xl border-2 px-8 py-3 text-sm font-bold transition-all hover:scale-105"
+                            style={{ borderColor: '#059669', color: '#059669' }}
+                        >
+                            Sign Up
+                        </button>
+                    </div>
+                    <button
+                        onClick={() => router.push('/')}
+                        className="mt-6 text-xs font-medium hover:underline"
+                        style={{ color: 'var(--text-muted)' }}
+                    >
+                        ← Back to Home
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     if (isRegisterPage) {
         return (
@@ -77,7 +114,7 @@ function TutorLayoutInner({ children }: { children: React.ReactNode }) {
 
     const handleSignOut = async () => {
         await signOut();
-        router.push('/login');
+        router.push('/');
     };
 
     return (

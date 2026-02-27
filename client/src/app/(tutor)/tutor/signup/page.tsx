@@ -7,14 +7,13 @@ import { useAuth } from '@/common/AuthContext';
 import { doc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { MentoraUser } from '@/config/types';
-import { Target, BrainCircuit, TrendingUp, GraduationCap, Users } from 'lucide-react';
+import { GraduationCap, Users, DollarSign, BarChart3, Shield } from 'lucide-react';
 
-export default function SignupPage() {
+export default function TutorSignupPage() {
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
-    const [role, setRole] = useState<'student' | 'parent'>('student');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const { signUp, signInWithGoogle } = useAuth();
@@ -22,23 +21,16 @@ export default function SignupPage() {
 
     const createUserDoc = async (uid: string, userEmail: string, name: string) => {
         const userData: Omit<MentoraUser, 'uid'> = {
-            roles: [role],
+            roles: ['tutor'],
             profile: {
                 fullName: name,
                 email: userEmail,
                 createdAt: Timestamp.now(),
             },
-            studentData: role === 'student' ? {
-                classLevel: '',
-                examFocus: [],
-                linkedParentIds: [],
-            } : null,
+            studentData: null,
             tutorData: null,
-            parentData: role === 'parent' ? {
-                linkedStudentIds: [],
-            } : null,
+            parentData: null,
         };
-
         await setDoc(doc(db, 'users', uid), userData);
     };
 
@@ -60,11 +52,11 @@ export default function SignupPage() {
         try {
             const user = await signUp(email, password);
             await createUserDoc(user.uid, email, fullName);
-            router.push('/profile-setup');
+            router.push('/tutor/basic-info');
         } catch (err: unknown) {
             const firebaseError = err as { code?: string };
             if (firebaseError.code === 'auth/email-already-in-use') {
-                setError('An account with this email already exists.');
+                setError('An account with this email already exists. Try logging in.');
             } else if (firebaseError.code === 'auth/weak-password') {
                 setError('Password is too weak. Use at least 6 characters.');
             } else {
@@ -82,23 +74,27 @@ export default function SignupPage() {
             const user = await signInWithGoogle();
             const userDoc = await getDoc(doc(db, 'users', user.uid));
             if (!userDoc.exists()) {
-                await createUserDoc(
-                    user.uid,
-                    user.email || '',
-                    user.displayName || 'User'
-                );
-                router.push('/profile-setup');
+                await createUserDoc(user.uid, user.email || '', user.displayName || 'Tutor');
+                router.push('/tutor/basic-info');
             } else {
                 const data = userDoc.data();
-                const roles: string[] = data?.roles || ['student'];
+                const roles: string[] = data?.roles || [];
                 if (roles.includes('tutor')) {
-                    router.push('/tutor');
+                    if (data?.tutorBasicInfo) {
+                        router.push('/tutor');
+                    } else {
+                        router.push('/tutor/basic-info');
+                    }
                 } else {
-                    router.push('/dashboard');
+                    // Add tutor role to existing user
+                    await setDoc(doc(db, 'users', user.uid), {
+                        ...data,
+                        roles: [...roles, 'tutor'],
+                    }, { merge: true });
+                    router.push('/tutor/basic-info');
                 }
             }
         } catch (err: unknown) {
-            console.error('Google sign-up error:', err);
             const firebaseError = err as { code?: string; message?: string };
             if (firebaseError.code !== 'auth/popup-closed-by-user') {
                 setError(`Google sign-up failed: ${firebaseError.code || firebaseError.message || 'Unknown error'}`);
@@ -109,15 +105,19 @@ export default function SignupPage() {
     };
 
     const features = [
-        { icon: Target, text: 'Personalized 1-on-1 sessions' },
-        { icon: BrainCircuit, text: 'AI-powered pre & post assessments' },
-        { icon: TrendingUp, text: 'Track your learning progress' },
+        { icon: GraduationCap, text: 'Teach students 1-on-1 in live sessions' },
+        { icon: DollarSign, text: 'Set your own hourly rates & earn' },
+        { icon: BarChart3, text: 'Track your analytics & ratings' },
+        { icon: Shield, text: 'Get verified with our quick quiz' },
+        { icon: Users, text: 'Build your student base on Mentora' },
     ];
 
     return (
         <div className="flex min-h-screen">
-            {/* Left Side — Gradient Brand Panel */}
-            <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden gradient-hero items-center justify-center p-12">
+            {/* Left Side — Emerald Brand Panel */}
+            <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden items-center justify-center p-12"
+                style={{ background: 'linear-gradient(135deg, #059669 0%, #047857 40%, #065f46 100%)' }}
+            >
                 <div className="absolute top-16 right-20 w-36 h-36 rounded-full bg-white/10 animate-float" />
                 <div className="absolute bottom-20 left-12 w-44 h-44 rounded-3xl bg-white/5 rotate-12" />
                 <div className="absolute top-1/2 left-10 w-20 h-20 rounded-2xl bg-white/10 -rotate-6" />
@@ -128,12 +128,12 @@ export default function SignupPage() {
                         <span className="text-3xl font-bold">M</span>
                     </div>
                     <h2 className="text-4xl font-bold leading-tight">
-                        Your journey to<br />
-                        <span className="text-indigo-200">excellence starts here.</span>
+                        Teach, inspire &<br />
+                        <span className="text-emerald-200">earn on your terms.</span>
                     </h2>
-                    <p className="mt-4 text-indigo-200 text-lg leading-relaxed">
-                        Join thousands of students already improving their grades with
-                        personalized tutoring and AI-powered assessments.
+                    <p className="mt-4 text-emerald-200 text-lg leading-relaxed">
+                        Join Mentora as a tutor and connect with students looking for
+                        personalized 1-on-1 learning sessions.
                     </p>
 
                     {/* Features */}
@@ -143,9 +143,9 @@ export default function SignupPage() {
                             return (
                                 <div key={i} className="flex items-center gap-3">
                                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 backdrop-blur-sm">
-                                        <Icon className="h-5 w-5 text-indigo-200" />
+                                        <Icon className="h-5 w-5 text-emerald-200" />
                                     </div>
-                                    <span className="text-sm font-medium text-indigo-100">{feature.text}</span>
+                                    <span className="text-sm font-medium text-emerald-100">{feature.text}</span>
                                 </div>
                             );
                         })}
@@ -156,19 +156,23 @@ export default function SignupPage() {
             {/* Right Side — Signup Form */}
             <div className="flex flex-1 items-center justify-center px-6 py-12 bg-white">
                 <div className="w-full max-w-md animate-fade-in-up">
-                    {/* Mobile Logo */}
+                    {/* Header */}
                     <div className="mb-8 text-center lg:text-left">
                         <div className="flex items-center gap-2.5 justify-center lg:justify-start mb-6">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-primary text-white font-bold text-lg shadow-md">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white font-bold text-lg shadow-md"
+                                style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
+                            >
                                 M
                             </div>
-                            <span className="text-2xl font-bold gradient-text">Mentora</span>
+                            <span className="text-2xl font-bold" style={{ background: 'linear-gradient(135deg, #059669, #047857)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                                Mentora Tutor
+                            </span>
                         </div>
                         <h1 className="text-3xl font-bold text-slate-900">
-                            Create your account
+                            Create your tutor account
                         </h1>
                         <p className="mt-2 text-slate-400">
-                            Start your learning journey today
+                            Start teaching and earning today
                         </p>
                     </div>
 
@@ -177,37 +181,6 @@ export default function SignupPage() {
                             {error}
                         </div>
                     )}
-
-                    {/* Role Selector */}
-                    <div className="mb-6">
-                        <label className="mb-2 block text-sm font-semibold text-slate-700">
-                            I am a...
-                        </label>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button
-                                type="button"
-                                onClick={() => setRole('student')}
-                                className={`flex items-center justify-center gap-2 rounded-xl border-2 px-4 py-3.5 text-sm font-semibold transition-all ${role === 'student'
-                                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'
-                                    : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
-                                    }`}
-                            >
-                                <GraduationCap className="h-4 w-4" />
-                                Student
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setRole('parent')}
-                                className={`flex items-center justify-center gap-2 rounded-xl border-2 px-4 py-3.5 text-sm font-semibold transition-all ${role === 'parent'
-                                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'
-                                    : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
-                                    }`}
-                            >
-                                <Users className="h-4 w-4" />
-                                Parent
-                            </button>
-                        </div>
-                    </div>
 
                     <form onSubmit={handleEmailSignup} className="space-y-4">
                         <div>
@@ -219,7 +192,7 @@ export default function SignupPage() {
                                 value={fullName}
                                 onChange={(e) => setFullName(e.target.value)}
                                 className="input-styled"
-                                placeholder="John Doe"
+                                placeholder="Dr. Jane Smith"
                                 required
                             />
                         </div>
@@ -269,9 +242,10 @@ export default function SignupPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="btn-primary w-full text-sm text-center disabled:opacity-50"
+                            className="w-full rounded-xl px-6 py-3 text-sm font-bold text-white shadow-lg transition-all hover:shadow-xl hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100"
+                            style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                         >
-                            {loading ? 'Creating account...' : 'Create Account'}
+                            {loading ? 'Creating account...' : 'Create Tutor Account'}
                         </button>
                     </form>
 
@@ -299,12 +273,20 @@ export default function SignupPage() {
 
                     {/* Login Link */}
                     <p className="mt-8 text-center text-sm text-slate-400">
-                        Already have an account?{' '}
+                        Already have a tutor account?{' '}
                         <Link
-                            href="/login"
-                            className="font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
+                            href="/tutor/login"
+                            className="font-semibold transition-colors"
+                            style={{ color: '#059669' }}
                         >
                             Sign In
+                        </Link>
+                    </p>
+
+                    {/* Back to Home */}
+                    <p className="mt-3 text-center text-xs text-slate-400">
+                        <Link href="/" className="hover:underline">
+                            ← Back to Home
                         </Link>
                     </p>
                 </div>

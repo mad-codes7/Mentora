@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/common/AuthContext';
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { TrendingUp, LineChart as LineChartIcon } from 'lucide-react';
+import { TrendingUp, LineChart as LineChartIcon, AlertCircle } from 'lucide-react';
 
 interface AssessmentEntry {
     topic: string;
@@ -39,49 +39,73 @@ const CustomTooltip = ({ active, payload }: any) => {
 export default function ProgressCharts() {
     const { firebaseUser } = useAuth();
     const [data, setData] = useState<AssessmentEntry[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchProgress = async () => {
-            if (!firebaseUser) return;
+            if (!firebaseUser) { setLoading(false); return; }
 
-            const q = query(
-                collection(db, 'assessments'),
-                where('userId', '==', firebaseUser.uid),
-                orderBy('takenAt', 'desc'),
-                limit(20)
-            );
+            try {
+                setLoading(true);
+                setError(null);
 
-            const snapshot = await getDocs(q);
-            const assessmentsBySession: Record<string, { pre?: number; post?: number; topic?: string; date?: string }> = {};
+                // Simple single-field query — no composite index needed
+                const q = query(
+                    collection(db, 'assessments'),
+                    where('userId', '==', firebaseUser.uid)
+                );
 
-            snapshot.docs.forEach((doc) => {
-                const d = doc.data();
-                const sessionKey = d.sessionId || doc.id;
-                if (!assessmentsBySession[sessionKey]) {
-                    assessmentsBySession[sessionKey] = {};
-                }
+                const snapshot = await getDocs(q);
 
-                const pct = Math.round((d.scoreData.totalScore / d.scoreData.maxScore) * 100);
-                if (d.type === 'pre_session') {
-                    assessmentsBySession[sessionKey].pre = pct;
-                    assessmentsBySession[sessionKey].topic = d.topic;
-                    assessmentsBySession[sessionKey].date = d.takenAt?.toDate?.()?.toLocaleDateString?.() || '';
-                } else {
-                    assessmentsBySession[sessionKey].post = pct;
-                }
-            });
+                // Sort client-side by takenAt descending and limit to 20
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+                docs.sort((a, b) => {
+                    const timeA = a.takenAt?.toDate?.()?.getTime?.() || 0;
+                    const timeB = b.takenAt?.toDate?.()?.getTime?.() || 0;
+                    return timeB - timeA;
+                });
+                const limited = docs.slice(0, 20);
 
-            const entries: AssessmentEntry[] = Object.values(assessmentsBySession)
-                .filter((v) => v.pre !== undefined || v.post !== undefined)
-                .map((v) => ({
-                    topic: v.topic || 'Quiz',
-                    preScore: v.pre || 0,
-                    postScore: v.post || 0,
-                    date: v.date || '',
-                }))
-                .slice(0, 8);
+                const assessmentsBySession: Record<string, { pre?: number; post?: number; topic?: string; date?: string }> = {};
 
-            setData(entries);
+                limited.forEach((d) => {
+                    const sessionKey = d.sessionId || d.id;
+                    if (!assessmentsBySession[sessionKey]) {
+                        assessmentsBySession[sessionKey] = {};
+                    }
+
+                    const pct = d.scoreData?.totalScore != null && d.scoreData?.maxScore
+                        ? Math.round((d.scoreData.totalScore / d.scoreData.maxScore) * 100)
+                        : 0;
+
+                    if (d.type === 'pre_session') {
+                        assessmentsBySession[sessionKey].pre = pct;
+                        assessmentsBySession[sessionKey].topic = d.topic;
+                        assessmentsBySession[sessionKey].date = d.takenAt?.toDate?.()?.toLocaleDateString?.() || '';
+                    } else {
+                        assessmentsBySession[sessionKey].post = pct;
+                    }
+                });
+
+                const entries: AssessmentEntry[] = Object.values(assessmentsBySession)
+                    .filter((v) => v.pre !== undefined || v.post !== undefined)
+                    .map((v) => ({
+                        topic: v.topic || 'Quiz',
+                        preScore: v.pre || 0,
+                        postScore: v.post || 0,
+                        date: v.date || '',
+                    }))
+                    .slice(0, 8);
+
+                setData(entries);
+            } catch (err) {
+                console.error('Error fetching progress data:', err);
+                setError('Failed to load progress data.');
+            } finally {
+                setLoading(false);
+            }
         };
 
         fetchProgress();
@@ -98,7 +122,19 @@ export default function ProgressCharts() {
                 </h3>
             </div>
 
-            {data.length === 0 ? (
+            {loading ? (
+                <div className="flex flex-col items-center py-10 text-center">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-transparent" style={{ borderTopColor: 'var(--primary)' }} />
+                    <p className="mt-3 text-sm text-slate-400">Loading progress...</p>
+                </div>
+            ) : error ? (
+                <div className="flex flex-col items-center py-10 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50">
+                        <AlertCircle className="h-8 w-8 text-red-400" />
+                    </div>
+                    <p className="mt-4 text-sm font-medium text-red-500">{error}</p>
+                </div>
+            ) : data.length === 0 ? (
                 <div className="flex flex-col items-center py-10 text-center">
                     <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 animate-float">
                         <LineChartIcon className="h-8 w-8 text-slate-300" />

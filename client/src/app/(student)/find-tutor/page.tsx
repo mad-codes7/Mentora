@@ -8,7 +8,8 @@ import {
     query,
     where,
     getDocs,
-    addDoc,
+    doc,
+    setDoc,
     Timestamp,
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
@@ -36,6 +37,7 @@ function FindTutorContent() {
     const [tutors, setTutors] = useState<TutorInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [booking, setBooking] = useState(false);
+    const [bookingTutorId, setBookingTutorId] = useState<string | null>(null);
     const [searchSeconds, setSearchSeconds] = useState(0);
 
     const searchMessages = [
@@ -114,33 +116,51 @@ function FindTutorContent() {
     }, [firebaseUser]);
 
     const handleBookTutor = async (tutorId: string) => {
-        if (!firebaseUser || booking) return;
+        if (booking) return;
+        if (!firebaseUser) {
+            alert('Please log in to book a session.');
+            router.push('/login');
+            return;
+        }
         setBooking(true);
+        setBookingTutorId(tutorId);
 
         try {
-            const sessionDoc = await addDoc(collection(db, 'sessions'), {
+            // Generate a doc ref manually so we can use setDoc
+            const sessionRef = doc(collection(db, 'sessions'));
+            const sessionData = {
                 studentId: firebaseUser.uid,
+                studentName: firebaseUser.displayName || 'Student',
                 tutorId,
                 topic,
-                meetingType: 'on_demand',
-                status: 'pending_payment',
+                meetingType: 'on_demand' as const,
+                status: 'pending_payment' as const,
                 scheduledStartTime: null,
                 actualStartTime: null,
                 endTime: null,
                 durationLimitMinutes: 60,
                 paymentTransactionId: '',
-                paymentStatus: 'pending',
+                paymentStatus: 'pending' as const,
                 preAssessmentId: assessmentId,
                 postAssessmentId: '',
                 ratingId: '',
-                sharedDocuments: [],
+                sharedDocuments: [] as string[],
                 createdAt: Timestamp.now(),
-            });
+            };
 
-            router.push(`/payment?sessionId=${sessionDoc.id}`);
-        } catch (error) {
+            // Race against a 10s timeout — prevents silent hang from Firestore rules
+            const timeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Firestore write timed out')), 10000)
+            );
+            await Promise.race([setDoc(sessionRef, sessionData), timeout]);
+
+            window.location.href = `/payment?sessionId=${sessionRef.id}`;
+        } catch (error: unknown) {
             console.error('Error creating session:', error);
+            const msg = error instanceof Error ? error.message : 'Unknown error';
+            alert(`Failed to book session: ${msg}`);
             setBooking(false);
+            setBookingTutorId(null);
         }
     };
 
@@ -254,6 +274,7 @@ function FindTutorContent() {
                             price={tutor.price}
                             isOnline={tutor.isOnline}
                             onBook={handleBookTutor}
+                            isBooking={bookingTutorId === tutor.uid}
                         />
                     ))}
                 </div>

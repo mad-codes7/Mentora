@@ -1,35 +1,55 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/common/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Session } from '@/config/types';
-import { CalendarDays, BookOpenCheck } from 'lucide-react';
+import { CalendarDays, BookOpenCheck, AlertCircle } from 'lucide-react';
 
 export default function UpcomingSessions() {
     const { firebaseUser } = useAuth();
     const router = useRouter();
     const [sessions, setSessions] = useState<Session[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!firebaseUser) return;
+        if (!firebaseUser) { setLoading(false); return; }
 
+        // Remove orderBy to avoid needing a composite Firestore index
         const q = query(
             collection(db, 'sessions'),
             where('studentId', '==', firebaseUser.uid),
-            where('status', 'in', ['paid_waiting', 'pending_payment', 'searching']),
-            orderBy('scheduledStartTime', 'asc')
+            where('status', 'in', ['paid_waiting', 'pending_payment', 'searching'])
         );
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map((doc) => ({
-                sessionId: doc.id,
-                ...doc.data(),
-            })) as Session[];
-            setSessions(data);
-        });
+        const unsubscribe = onSnapshot(
+            q,
+            (snapshot) => {
+                const data = snapshot.docs.map((doc) => ({
+                    sessionId: doc.id,
+                    ...doc.data(),
+                })) as Session[];
+
+                // Sort client-side by scheduledStartTime ascending
+                data.sort((a, b) => {
+                    const timeA = a.scheduledStartTime?.toDate?.()?.getTime?.() || 0;
+                    const timeB = b.scheduledStartTime?.toDate?.()?.getTime?.() || 0;
+                    return timeA - timeB;
+                });
+
+                setSessions(data);
+                setLoading(false);
+                setError(null);
+            },
+            (err) => {
+                console.error('Error listening to upcoming sessions:', err);
+                setError('Failed to load sessions. Please refresh.');
+                setLoading(false);
+            }
+        );
 
         return () => unsubscribe();
     }, [firebaseUser]);
@@ -75,7 +95,19 @@ export default function UpcomingSessions() {
                 )}
             </div>
 
-            {sessions.length === 0 ? (
+            {loading ? (
+                <div className="flex flex-col items-center py-10 text-center">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-transparent" style={{ borderTopColor: 'var(--primary)' }} />
+                    <p className="mt-3 text-sm text-slate-400">Loading sessions...</p>
+                </div>
+            ) : error ? (
+                <div className="flex flex-col items-center py-10 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50">
+                        <AlertCircle className="h-8 w-8 text-red-400" />
+                    </div>
+                    <p className="mt-4 text-sm font-medium text-red-500">{error}</p>
+                </div>
+            ) : sessions.length === 0 ? (
                 <div className="flex flex-col items-center py-10 text-center">
                     <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 animate-float">
                         <BookOpenCheck className="h-8 w-8 text-slate-300" />

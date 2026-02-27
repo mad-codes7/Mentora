@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, where, orderBy, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/common/AuthContext';
 import { Session } from '@/config/types';
@@ -17,10 +17,10 @@ export default function HistoryPage() {
             if (!firebaseUser) return;
 
             try {
+                // Simple single-field query — no composite index needed
                 const q = query(
                     collection(db, 'sessions'),
-                    where('studentId', '==', firebaseUser.uid),
-                    orderBy('createdAt', 'desc')
+                    where('studentId', '==', firebaseUser.uid)
                 );
 
                 const snapshot = await getDocs(q);
@@ -28,6 +28,14 @@ export default function HistoryPage() {
                     sessionId: doc.id,
                     ...doc.data(),
                 })) as Session[];
+
+                // Sort client-side by createdAt descending
+                data.sort((a, b) => {
+                    const timeA = a.createdAt?.toDate?.()?.getTime?.() || 0;
+                    const timeB = b.createdAt?.toDate?.()?.getTime?.() || 0;
+                    return timeB - timeA;
+                });
+
                 setSessions(data);
             } catch (error) {
                 console.error('Error fetching session history:', error);

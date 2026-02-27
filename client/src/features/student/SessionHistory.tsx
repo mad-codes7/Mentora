@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/common/AuthContext';
-import { ClipboardList, Inbox } from 'lucide-react';
+import { ClipboardList, Inbox, AlertCircle } from 'lucide-react';
 
 interface HistoryRow {
     sessionId: string;
@@ -19,52 +19,75 @@ interface HistoryRow {
 export default function SessionHistory() {
     const { firebaseUser } = useAuth();
     const [sessions, setSessions] = useState<HistoryRow[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchHistory = async () => {
-            if (!firebaseUser) return;
+            if (!firebaseUser) { setLoading(false); return; }
 
-            const q = query(
-                collection(db, 'sessions'),
-                where('studentId', '==', firebaseUser.uid),
-                where('status', 'in', ['completed', 'cancelled'])
-            );
+            try {
+                setLoading(true);
+                setError(null);
 
-            const snapshot = await getDocs(q);
-            const rawSessions = snapshot.docs.map((doc) => ({
-                sessionId: doc.id,
-                ...doc.data(),
+                const q = query(
+                    collection(db, 'sessions'),
+                    where('studentId', '==', firebaseUser.uid),
+                    where('status', 'in', ['completed', 'cancelled'])
+                );
+
+                const snapshot = await getDocs(q);
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            })) as any[];
+                const rawSessions = snapshot.docs.map((d) => ({
+                    sessionId: d.id,
+                    ...d.data(),
+                })) as any[];
 
-            // Fetch tutor names
-            const tutorIds = [...new Set(rawSessions.filter(s => s.tutorId).map(s => s.tutorId))];
-            const tutorMap: Record<string, string> = {};
-            await Promise.all(
-                tutorIds.map(async (tid) => {
-                    const tutorDoc = await getDoc(doc(db, 'users', tid));
-                    if (tutorDoc.exists()) {
-                        const td = tutorDoc.data();
-                        tutorMap[tid] = td?.displayName || td?.profile?.fullName || 'Tutor';
-                    }
-                })
-            );
+                // Sort client-side to avoid needing composite Firestore index
+                rawSessions.sort((a, b) => {
+                    const dateA = a.createdAt?.toDate?.()?.getTime?.() || 0;
+                    const dateB = b.createdAt?.toDate?.()?.getTime?.() || 0;
+                    return dateB - dateA;
+                });
 
-            const enriched = rawSessions.map((s) => ({
-                ...s,
-                tutorName: s.tutorId ? tutorMap[s.tutorId] || 'Unknown' : 'Not Assigned',
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                amountPaid: (s as any).amountPaid as number || 0,
-            }));
+                // Fetch tutor names
+                const tutorIds = [...new Set(rawSessions.filter(s => s.tutorId).map(s => s.tutorId))];
+                const tutorMap: Record<string, string> = {};
+                await Promise.all(
+                    tutorIds.map(async (tid) => {
+                        try {
+                            const tutorDoc = await getDoc(doc(db, 'users', tid));
+                            if (tutorDoc.exists()) {
+                                const td = tutorDoc.data();
+                                tutorMap[tid] = td?.displayName || td?.profile?.fullName || 'Tutor';
+                            }
+                        } catch {
+                            // Skip failed lookups
+                        }
+                    })
+                );
 
-            setSessions(enriched.map((s) => ({
-                sessionId: s.sessionId,
-                topic: s.topic || 'N/A',
-                date: s.scheduledStartTime?.toDate?.()?.toLocaleDateString?.() || s.createdAt?.toDate?.()?.toLocaleDateString?.() || 'N/A',
-                status: s.status || 'N/A',
-                tutorName: s.tutorName,
-                amountPaid: s.amountPaid,
-            })));
+                const enriched = rawSessions.map((s) => ({
+                    ...s,
+                    tutorName: s.tutorId ? tutorMap[s.tutorId] || 'Unknown' : 'Not Assigned',
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    amountPaid: (s as any).amountPaid as number || 0,
+                }));
+
+                setSessions(enriched.map((s) => ({
+                    sessionId: s.sessionId,
+                    topic: s.topic || 'N/A',
+                    date: s.scheduledStartTime?.toDate?.()?.toLocaleDateString?.() || s.createdAt?.toDate?.()?.toLocaleDateString?.() || 'N/A',
+                    status: s.status || 'N/A',
+                    tutorName: s.tutorName,
+                    amountPaid: s.amountPaid,
+                })));
+            } catch (err) {
+                console.error('Error fetching session history:', err);
+                setError('Failed to load session history. Please try again.');
+            } finally {
+                setLoading(false);
+            }
         };
 
         fetchHistory();
@@ -81,7 +104,19 @@ export default function SessionHistory() {
                 </h3>
             </div>
 
-            {sessions.length === 0 ? (
+            {loading ? (
+                <div className="flex flex-col items-center py-10 text-center">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-transparent" style={{ borderTopColor: 'var(--primary)' }} />
+                    <p className="mt-3 text-sm text-slate-400">Loading history...</p>
+                </div>
+            ) : error ? (
+                <div className="flex flex-col items-center py-10 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50">
+                        <AlertCircle className="h-8 w-8 text-red-400" />
+                    </div>
+                    <p className="mt-4 text-sm font-medium text-red-500">{error}</p>
+                </div>
+            ) : sessions.length === 0 ? (
                 <div className="flex flex-col items-center py-10 text-center">
                     <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 animate-float">
                         <Inbox className="h-8 w-8 text-slate-300" />

@@ -33,14 +33,14 @@ interface SessionItem {
 }
 
 export default function TutorDashboard() {
-    const { firebaseUser } = useAuth();
+    const { firebaseUser, mentoraUser } = useAuth();
     const { profile, loading: profileLoading } = useTutor();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [wallet, setWallet] = useState<WalletData | null>(null);
     const [recentSessions, setRecentSessions] = useState<SessionItem[]>([]);
     const [pendingCount, setPendingCount] = useState(0);
 
-    const firstName = firebaseUser?.displayName?.split(' ')[0] || 'Tutor';
+    const firstName = mentoraUser?.profile?.fullName?.split(' ')[0] || firebaseUser?.displayName?.split(' ')[0] || 'Tutor';
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 

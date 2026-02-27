@@ -36,7 +36,7 @@ export default function ProfileSetupPage() {
             router.push('/dashboard');
         }
         if (isParent && mentoraUser?.parentData?.linkedStudentIds?.length) {
-            router.push('/dashboard');
+            router.push('/parent');
         }
     }, [mentoraUser, isParent, router]);
 
@@ -89,7 +89,11 @@ export default function ProfileSetupPage() {
             }
 
             await refreshUserData();
-            router.push('/dashboard');
+            if (isParent) {
+                router.push('/parent');
+            } else {
+                router.push('/dashboard');
+            }
         } catch (error) {
             console.error('Profile setup error:', error);
         } finally {
@@ -188,8 +192,8 @@ export default function ProfileSetupPage() {
                                     }}
                                     maxLength={6}
                                     className={`w-full rounded-lg border px-4 py-2.5 text-slate-900 text-center text-2xl font-bold tracking-[0.5em] placeholder-slate-400 transition-colors focus:outline-none focus:ring-2 ${codeError
-                                            ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
-                                            : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500/20'
+                                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
+                                        : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500/20'
                                         }`}
                                     placeholder="000000"
                                     required

@@ -9,6 +9,7 @@ interface TutorCardProps {
     rating: number;
     price: number;
     isOnline?: boolean;
+    isBooking?: boolean;
     onBook: (tutorId: string) => void;
 }
 
@@ -19,14 +20,14 @@ export default function TutorCard({
     rating,
     price,
     isOnline = false,
+    isBooking = false,
     onBook,
 }: TutorCardProps) {
     const renderStars = (rating: number) => {
         return Array.from({ length: 5 }, (_, i) => (
             <span
                 key={i}
-                className={`text-sm ${i < Math.round(rating) ? 'text-amber-400' : 'text-slate-200'
-                    }`}
+                className={`text-sm ${i < Math.round(rating) ? 'text-amber-400' : 'text-slate-200'}`}
             >
                 ★
             </span>
@@ -82,9 +83,17 @@ export default function TutorCard({
             {/* Book Button */}
             <button
                 onClick={() => onBook(tutorId)}
-                className="mt-4 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 group-hover:bg-blue-700"
+                disabled={isBooking}
+                className="mt-4 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 group-hover:bg-blue-700 disabled:opacity-60 disabled:cursor-wait flex items-center justify-center gap-2"
             >
-                Book Session
+                {isBooking ? (
+                    <>
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                        Booking...
+                    </>
+                ) : (
+                    'Book Session'
+                )}
             </button>
         </div>
     );

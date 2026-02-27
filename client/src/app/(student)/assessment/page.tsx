@@ -24,6 +24,7 @@ function AssessmentContent() {
     const [loading, setLoading] = useState(true);
     const [submitted, setSubmitted] = useState(false);
     const [score, setScore] = useState({ total: 0, max: 0 });
+    const [savedAssessmentId, setSavedAssessmentId] = useState('');
     const [timeLeft, setTimeLeft] = useState(300);
     const TOTAL_TIME = 300;
 
@@ -105,19 +106,16 @@ function AssessmentContent() {
                 takenAt: Timestamp.now(),
             });
 
-            if (type === 'pre_session' && !sessionId) {
-                setTimeout(() => {
-                    router.push(
-                        `/find-tutor?topic=${encodeURIComponent(topic)}&assessmentId=${docRef.id}`
-                    );
-                }, 2000);
-            }
+            setSavedAssessmentId(docRef.id);
+
+            // Pre-session: no auto-redirect — user clicks "Find a Tutor" button
 
             if (type === 'post_session' && sessionId) {
-                // Link the post-assessment to the session
-                await updateDoc(doc(db, 'sessions', sessionId), {
+                // Link the post-assessment to the session (fire-and-forget, don't block redirect)
+                updateDoc(doc(db, 'sessions', sessionId), {
                     postAssessmentId: docRef.id,
-                });
+                }).catch((e) => console.warn('Could not update session:', e));
+
                 setTimeout(() => {
                     router.push(`/post-session/${sessionId}?assessmentId=${docRef.id}`);
                 }, 2000);
@@ -215,10 +213,27 @@ function AssessmentContent() {
                                     ? 'Good effort! Keep practicing!'
                                     : 'Keep going! You\'ll get better!'}
                         </p>
-                        {type === 'pre_session' && !sessionId && (
-                            <p className="mt-3 text-xs text-indigo-200">
-                                Redirecting to find a tutor...
-                            </p>
+
+                        {/* Pre-session: show Find Tutor button */}
+                        {type === 'pre_session' && (
+                            <button
+                                onClick={() => router.push(
+                                    `/find-tutor?topic=${encodeURIComponent(topic)}&assessmentId=${savedAssessmentId}`
+                                )}
+                                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white/20 backdrop-blur-sm px-6 py-3 text-sm font-bold text-white shadow-lg hover:bg-white/30 transition-all hover:scale-105"
+                            >
+                                🎓 Find a Tutor
+                            </button>
+                        )}
+
+                        {/* Post-session: show redirecting message */}
+                        {type === 'post_session' && sessionId && (
+                            <div className="mt-4 flex items-center justify-center gap-2">
+                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                <p className="text-xs text-indigo-200">
+                                    Redirecting to rate your session...
+                                </p>
+                            </div>
                         )}
                     </div>
                 </div>

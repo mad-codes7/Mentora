@@ -17,7 +17,7 @@ export default function Navbar() {
 
     const handleSignOut = async () => {
         await signOut();
-        router.push('/login');
+        router.push('/');
     };
 
     const getInitials = (name: string) => {
@@ -75,8 +75,8 @@ export default function Navbar() {
                     <Link
                         href="/notifications"
                         className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-all ${pathname === '/notifications'
-                                ? 'bg-indigo-50 text-indigo-600'
-                                : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
+                            ? 'bg-indigo-50 text-indigo-600'
+                            : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
                             }`}
                     >
                         <Bell className="h-5 w-5" />
@@ -86,8 +86,8 @@ export default function Navbar() {
                     <Link
                         href="/profile"
                         className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-all ${pathname === '/profile'
-                                ? 'bg-indigo-50 text-indigo-600'
-                                : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
+                            ? 'bg-indigo-50 text-indigo-600'
+                            : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
                             }`}
                     >
                         <User className="h-5 w-5" />
@@ -96,7 +96,7 @@ export default function Navbar() {
                     {isTutor && (
                         <button
                             onClick={() =>
-                                router.push(isOnTutorDashboard ? '/dashboard' : '/tutor/dashboard')
+                                router.push(isOnTutorDashboard ? '/dashboard' : '/tutor')
                             }
                             className="hidden sm:flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 transition-all hover:bg-indigo-100 hover:shadow-sm"
                         >

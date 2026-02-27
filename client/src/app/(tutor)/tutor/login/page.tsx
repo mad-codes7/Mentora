@@ -8,7 +8,7 @@ import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { MentoraUser } from '@/config/types';
 
-export default function LoginPage() {
+export default function TutorLoginPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -19,37 +19,36 @@ export default function LoginPage() {
     const redirectUser = async (uid: string, displayName?: string | null, userEmail?: string | null) => {
         const userDoc = await getDoc(doc(db, 'users', uid));
         if (!userDoc.exists()) {
-            // New user — create as student by default
+            // New user — create as tutor
             const userData: Omit<MentoraUser, 'uid'> = {
-                roles: ['student'],
+                roles: ['tutor'],
                 profile: {
-                    fullName: displayName || 'User',
+                    fullName: displayName || 'Tutor',
                     email: userEmail || '',
                     createdAt: Timestamp.now(),
                 },
-                studentData: {
-                    classLevel: '',
-                    examFocus: [],
-                    linkedParentIds: [],
-                },
+                studentData: null,
                 tutorData: null,
                 parentData: null,
             };
             await setDoc(doc(db, 'users', uid), userData);
-            router.push('/profile-setup');
+            router.push('/tutor/basic-info');
         } else {
             const data = userDoc.data();
-            const roles: string[] = data?.roles || ['student'];
+            const roles: string[] = data?.roles || [];
 
-            // Redirect based on role
-            if (roles.includes('tutor')) {
-                router.push('/tutor');
-            } else if (roles.includes('parent')) {
-                router.push('/parent');
-            } else if (!data?.studentData?.classLevel) {
-                router.push('/profile-setup');
+            if (!roles.includes('tutor')) {
+                // Add tutor role
+                await setDoc(doc(db, 'users', uid), {
+                    roles: [...roles, 'tutor'],
+                }, { merge: true });
+                router.push('/tutor/basic-info');
+            } else if (!data?.tutorBasicInfo) {
+                router.push('/tutor/basic-info');
+            } else if (!data?.tutorData?.subjects?.length) {
+                router.push('/tutor/register');
             } else {
-                router.push('/dashboard');
+                router.push('/tutor');
             }
         }
     };
@@ -98,8 +97,10 @@ export default function LoginPage() {
 
     return (
         <div className="flex min-h-screen">
-            {/* Left Side — Gradient Brand Panel */}
-            <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden gradient-hero items-center justify-center p-12">
+            {/* Left Side — Emerald Brand Panel */}
+            <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden items-center justify-center p-12"
+                style={{ background: 'linear-gradient(135deg, #059669 0%, #047857 40%, #065f46 100%)' }}
+            >
                 {/* Decorative shapes */}
                 <div className="absolute top-20 left-10 w-32 h-32 rounded-full bg-white/10 animate-float" />
                 <div className="absolute bottom-24 right-16 w-48 h-48 rounded-3xl bg-white/5 rotate-12" />
@@ -111,26 +112,26 @@ export default function LoginPage() {
                         <span className="text-3xl font-bold">M</span>
                     </div>
                     <h2 className="text-4xl font-bold leading-tight">
-                        Learn from the best,<br />
-                        <span className="text-indigo-200">anytime, anywhere.</span>
+                        Welcome back,<br />
+                        <span className="text-emerald-200">Tutor!</span>
                     </h2>
-                    <p className="mt-4 text-indigo-200 text-lg leading-relaxed">
-                        Connect with expert tutors for personalized 1-on-1 live sessions.
-                        AI-powered assessments track your progress.
+                    <p className="mt-4 text-emerald-200 text-lg leading-relaxed">
+                        Sign in to manage your sessions, connect with students, and
+                        track your teaching analytics.
                     </p>
 
                     {/* Trust signals */}
                     <div className="mt-10 flex items-center gap-6">
                         <div className="flex -space-x-2">
-                            {['#818CF8', '#60A5FA', '#34D399', '#FBBF24'].map((color, i) => (
+                            {['#10B981', '#059669', '#047857', '#34D399'].map((color, i) => (
                                 <div key={i} className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white/30 text-xs font-bold text-white" style={{ backgroundColor: color }}>
-                                    {['A', 'B', 'C', 'D'][i]}
+                                    {['T', 'U', 'T', 'R'][i]}
                                 </div>
                             ))}
                         </div>
                         <div>
-                            <p className="text-sm font-bold text-white">10,000+ students</p>
-                            <p className="text-xs text-indigo-200">already learning on Mentora</p>
+                            <p className="text-sm font-bold text-white">500+ verified tutors</p>
+                            <p className="text-xs text-emerald-200">teaching on Mentora</p>
                         </div>
                     </div>
                 </div>
@@ -142,16 +143,20 @@ export default function LoginPage() {
                     {/* Mobile Logo */}
                     <div className="mb-8 text-center lg:text-left">
                         <div className="flex items-center gap-2.5 justify-center lg:justify-start mb-6">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-primary text-white font-bold text-lg shadow-md">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white font-bold text-lg shadow-md"
+                                style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
+                            >
                                 M
                             </div>
-                            <span className="text-2xl font-bold gradient-text">Mentora</span>
+                            <span className="text-2xl font-bold" style={{ background: 'linear-gradient(135deg, #059669, #047857)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                                Mentora Tutor
+                            </span>
                         </div>
                         <h1 className="text-3xl font-bold text-slate-900">
                             Welcome back
                         </h1>
                         <p className="mt-2 text-slate-400">
-                            Sign in to continue learning
+                            Sign in to your tutor account
                         </p>
                     </div>
 
@@ -193,7 +198,8 @@ export default function LoginPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="btn-primary w-full text-sm text-center disabled:opacity-50"
+                            className="w-full rounded-xl px-6 py-3 text-sm font-bold text-white shadow-lg transition-all hover:shadow-xl hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100"
+                            style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}
                         >
                             {loading ? 'Signing in...' : 'Sign In'}
                         </button>
@@ -223,12 +229,20 @@ export default function LoginPage() {
 
                     {/* Sign Up Link */}
                     <p className="mt-8 text-center text-sm text-slate-400">
-                        Don&apos;t have an account?{' '}
+                        Don&apos;t have a tutor account?{' '}
                         <Link
-                            href="/signup"
-                            className="font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
+                            href="/tutor/signup"
+                            className="font-semibold transition-colors"
+                            style={{ color: '#059669' }}
                         >
                             Sign Up
+                        </Link>
+                    </p>
+
+                    {/* Back to Home */}
+                    <p className="mt-3 text-center text-xs text-slate-400">
+                        <Link href="/" className="hover:underline">
+                            ← Back to Home
                         </Link>
                     </p>
                 </div>

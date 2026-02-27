@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, use } from 'react';
+import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/common/AuthContext';
 import { doc, updateDoc, Timestamp, onSnapshot, setDoc } from 'firebase/firestore';
@@ -72,7 +72,7 @@ export default function RoomPage({ params }: RoomPageProps) {
 
     // ── Redirect if not logged in ──
     useEffect(() => {
-        if (!authLoading && !firebaseUser) router.push('/login');
+        if (!authLoading && !firebaseUser) router.push('/');
     }, [authLoading, firebaseUser, router]);
 
     // ── Subscribe to session doc ──
@@ -106,34 +106,41 @@ export default function RoomPage({ params }: RoomPageProps) {
     }, [sessionId, firebaseUser]);
 
     // ── SYNCED END CALL: redirect both parties ──
+    const hasRedirectedRef = useRef(false);
     useEffect(() => {
-        if (!isCallEnded || !session) return;
+        if (!isCallEnded || !session || hasRedirectedRef.current) return;
+        hasRedirectedRef.current = true;
 
-        // Save student notes if applicable
-        const saveAndRedirect = async () => {
-            if (isStudent && notes.trim()) {
-                await updateDoc(doc(db, 'sessions', sessionId), {
-                    studentNotes: notes,
-                });
-            }
-            await updateDoc(doc(db, 'sessions', sessionId), {
-                status: 'completed',
-                endTime: Timestamp.now(),
-            });
+        // Capture values at the time of call end to avoid stale closures
+        const currentTopic = session.topic || 'General';
+        const currentNotes = notes;
 
-            // Small delay to show "Call ended" overlay
-            setTimeout(() => {
-                if (isTutor) {
-                    router.push('/tutor/sessions');
-                } else {
-                    // Student goes to post-assessment quiz first, then to rating page
-                    const topic = encodeURIComponent(session.topic || 'General');
-                    router.push(`/assessment?type=post_session&topic=${topic}&sessionId=${sessionId}`);
+        // Fire-and-forget Firestore writes (don't block redirect)
+        (async () => {
+            try {
+                if (isStudent && currentNotes.trim()) {
+                    await updateDoc(doc(db, 'sessions', sessionId), {
+                        studentNotes: currentNotes,
+                    });
                 }
-            }, 2000);
-        };
+                await updateDoc(doc(db, 'sessions', sessionId), {
+                    status: 'completed',
+                    endTime: Timestamp.now(),
+                });
+            } catch (err) {
+                console.error('Error saving session end data:', err);
+            }
+        })();
 
-        saveAndRedirect().catch(console.error);
+        // Redirect quickly — don't wait for Firestore
+        setTimeout(() => {
+            if (isTutor) {
+                router.push('/tutor/sessions');
+            } else {
+                const topic = encodeURIComponent(currentTopic);
+                router.push(`/assessment?type=post_session&topic=${topic}&sessionId=${sessionId}`);
+            }
+        }, 1000);
     }, [isCallEnded, session, isStudent, isTutor, notes, sessionId, router]);
 
     // ── Waiting timer ──
