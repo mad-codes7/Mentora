@@ -79,16 +79,38 @@ function PaymentContent() {
         if (!firebaseUser || !sessionId) return;
         setPaying(true);
 
+        const stripeEnabled = process.env.NEXT_PUBLIC_STRIPE_ENABLED === 'true';
+
         try {
-            // Simulated payment — update session directly
-            await updateDoc(doc(db, 'sessions', sessionId), {
-                status: 'paid_waiting',
-                paymentStatus: 'success',
-                paymentTimestamp: Timestamp.now(),
-                paymentTransactionId: `SIM_${Date.now()}`,
-            });
-            setPaid(true);
-            setTimeout(() => router.push(`/room/${sessionId}`), 2000);
+            if (stripeEnabled) {
+                // Real Stripe Checkout
+                const res = await fetch('/api/create-checkout-session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        amount: tutorPrice || 200,
+                        topic,
+                        sessionId,
+                    }),
+                });
+                const data = await res.json();
+                if (data.url) {
+                    window.location.href = data.url;
+                    return; // redirecting to Stripe
+                } else {
+                    throw new Error(data.error || 'Failed to create checkout session');
+                }
+            } else {
+                // Simulated payment (dev mode) — update session directly
+                await updateDoc(doc(db, 'sessions', sessionId), {
+                    status: 'paid_waiting',
+                    paymentStatus: 'success',
+                    paymentTimestamp: Timestamp.now(),
+                    paymentTransactionId: `SIM_${Date.now()}`,
+                });
+                setPaid(true);
+                setTimeout(() => router.push(`/room/${sessionId}`), 2000);
+            }
         } catch (err) {
             console.error('Payment error:', err);
             alert('Payment failed. Please try again.');

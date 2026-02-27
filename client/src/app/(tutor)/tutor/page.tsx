@@ -4,9 +4,12 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/common/AuthContext';
 import { useTutor } from '@/hooks/useTutor';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '@/config/firebase';
 import {
     BookOpen, Users, Star, Zap, BarChart3, Wallet,
-    CalendarDays, UserCircle, TrendingUp, Bell, Video, Inbox
+    CalendarDays, UserCircle, TrendingUp, Bell, Video, Inbox,
+    Power
 } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000';
@@ -39,6 +42,24 @@ export default function TutorDashboard() {
     const [wallet, setWallet] = useState<WalletData | null>(null);
     const [recentSessions, setRecentSessions] = useState<SessionItem[]>([]);
     const [pendingCount, setPendingCount] = useState(0);
+    const [isActive, setIsActive] = useState<boolean>(mentoraUser?.tutorData?.isActive ?? false);
+    const [togglingActive, setTogglingActive] = useState(false);
+
+    const handleToggleActive = async () => {
+        if (!firebaseUser || togglingActive) return;
+        setTogglingActive(true);
+        const newValue = !isActive;
+        try {
+            await updateDoc(doc(db, 'users', firebaseUser.uid), {
+                'tutorData.isActive': newValue,
+            });
+            setIsActive(newValue);
+        } catch (err) {
+            console.error('Failed to toggle active status:', err);
+        } finally {
+            setTogglingActive(false);
+        }
+    };
 
     const firstName = mentoraUser?.profile?.fullName?.split(' ')[0] || firebaseUser?.displayName?.split(' ')[0] || 'Tutor';
     const hour = new Date().getHours();
@@ -124,13 +145,33 @@ export default function TutorDashboard() {
 
                 <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
                     <div>
-                        <p className="text-indigo-200 text-sm font-medium">{greeting}</p>
+                        <div className="flex items-center gap-3 mb-1">
+                            <p className="text-indigo-200 text-sm font-medium">{greeting}</p>
+                        </div>
                         <h1 className="mt-1 text-3xl font-bold tracking-tight">
                             {firstName}, let&apos;s teach today!
                         </h1>
                         <p className="mt-2 text-indigo-200 max-w-lg">
                             Manage your sessions, connect with students, and grow your tutoring career.
                         </p>
+                        {/* Active / Inactive Toggle */}
+                        <button
+                            onClick={handleToggleActive}
+                            disabled={togglingActive}
+                            className={`mt-4 flex items-center gap-2.5 rounded-full px-5 py-2.5 text-sm font-bold transition-all duration-300 shadow-md hover:shadow-lg hover:scale-105 disabled:opacity-60 ${isActive
+                                    ? 'bg-emerald-500 text-white'
+                                    : 'bg-white/20 text-white/80 backdrop-blur-sm border border-white/30'
+                                }`}
+                        >
+                            <span className={`relative flex h-3 w-3 ${isActive ? '' : 'opacity-50'
+                                }`}>
+                                {isActive && <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-75 animate-ping" />}
+                                <span className={`relative inline-flex h-3 w-3 rounded-full ${isActive ? 'bg-white' : 'bg-white/50'
+                                    }`} />
+                            </span>
+                            <Power className="h-4 w-4" />
+                            {togglingActive ? 'Updating...' : isActive ? 'Active — Accepting Students' : 'Inactive — Go Online'}
+                        </button>
                     </div>
 
                     <div className="flex gap-6">

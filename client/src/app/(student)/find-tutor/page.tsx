@@ -79,16 +79,30 @@ function FindTutorContent() {
     useEffect(() => {
         const fetchTutors = async () => {
             try {
+                // Query ALL registered tutors (not just verified)
                 const q = query(
                     collection(db, 'users'),
-                    where('roles', 'array-contains', 'tutor'),
-                    where('tutorData.isVerified', '==', true)
+                    where('roles', 'array-contains', 'tutor')
                 );
 
                 const snapshot = await getDocs(q);
                 const now = new Date();
                 const currentDay = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()];
                 const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                // Fetch actual ratings from the ratings collection for accurate display
+                const ratingsSnap = await getDocs(collection(db, 'ratings'));
+                const ratingsByTutor: Record<string, { total: number; count: number }> = {};
+                ratingsSnap.docs.forEach(rDoc => {
+                    const rd = rDoc.data();
+                    const tid = rd.tutorId;
+                    const star = rd.metrics?.studentStarRating || 0;
+                    if (tid && star > 0) {
+                        if (!ratingsByTutor[tid]) ratingsByTutor[tid] = { total: 0, count: 0 };
+                        ratingsByTutor[tid].total += star;
+                        ratingsByTutor[tid].count += 1;
+                    }
+                });
 
                 const tutorList: TutorInfo[] = snapshot.docs
                     .filter((doc) => doc.id !== firebaseUser?.uid)
@@ -122,13 +136,22 @@ function FindTutorContent() {
                             }
                         }
 
+                        // isActive = tutor has toggled "Active" in their dashboard
+                        const tutorIsActive = data.tutorData?.isActive === true;
+
+                        // Use real average rating from ratings collection, fall back to aggregateRating
+                        const tutorRating = ratingsByTutor[doc.id];
+                        const avgRating = tutorRating
+                            ? Math.round((tutorRating.total / tutorRating.count) * 10) / 10
+                            : (data.tutorData?.aggregateRating || 0);
+
                         return {
                             uid: doc.id,
                             name: data.displayName || data.profile?.fullName || 'Tutor',
                             subjects: tutorSubjects,
-                            rating: data.tutorData?.aggregateRating || 4.0,
+                            rating: avgRating,
                             price: data.tutorData?.hourlyRate || data.tutorData?.sessionPrice || 200,
-                            isOnline: isAvailableNow,
+                            isOnline: tutorIsActive,
                             isMatched: matchedSubjects.length > 0,
                             matchedSubjects,
                             availability,
@@ -139,7 +162,7 @@ function FindTutorContent() {
                 // Filter and sort tutors
                 let filteredTutors = tutorList;
 
-                // If in connect mode, show only online tutors
+                // If in connect mode, show only ACTIVE tutors (who toggled 'Active' in their dashboard)
                 if (mode === 'connect') {
                     filteredTutors = filteredTutors.filter(t => t.isOnline);
                 }

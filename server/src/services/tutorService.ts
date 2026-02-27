@@ -63,13 +63,13 @@ export async function updateTutorProfile(uid: string, data: {
         updatedAt: new Date().toISOString(),
     };
 
-    if (data.subjects) updateData['tutorData.subjects'] = data.subjects;
-    if (data.availability) updateData['tutorData.availability'] = data.availability;
-    if (data.bio) {
+    if (data.subjects !== undefined) updateData['tutorData.subjects'] = data.subjects;
+    if (data.availability !== undefined) updateData['tutorData.availability'] = data.availability;
+    if (data.bio !== undefined) {
         updateData['tutorData.bio'] = data.bio;
         updateData['profile.bio'] = data.bio;
     }
-    if (data.experience) updateData['tutorData.experience'] = data.experience;
+    if (data.experience !== undefined) updateData['tutorData.experience'] = data.experience;
     if (data.hourlyRate !== undefined) updateData['tutorData.hourlyRate'] = data.hourlyRate;
     if (data.qualification !== undefined) updateData['tutorData.qualification'] = data.qualification;
 
@@ -114,13 +114,16 @@ export async function acceptSession(sessionId: string, tutorId: string) {
         throw new Error('Session cannot be accepted in its current state');
     }
 
+    // For slot bookings (pending_tutor_approval), skip payment and go straight to paid_waiting
+    const newStatus = session?.status === 'pending_tutor_approval' ? 'paid_waiting' : 'pending_payment';
+
     await sessionRef.update({
         tutorId,
-        status: 'pending_payment',
+        status: newStatus,
         updatedAt: new Date().toISOString(),
     });
 
-    return { sessionId, status: 'pending_payment' };
+    return { sessionId, status: newStatus };
 }
 
 // ─── Update Session Status ─────────────────────────────────────
@@ -237,7 +240,7 @@ export async function getAnalytics(uid: string) {
 
     console.log('[getAnalytics] sessions found:', sessionsSnapshot.size);
 
-    interface SessionData { status: string; studentId: string; topic: string; endTime?: string; createdAt?: string }
+    interface SessionData { status: string; studentId: string; topic: string; endTime?: unknown; createdAt?: unknown }
     interface RatingData { metrics?: { studentStarRating?: number; scoreDelta?: number; finalCalculatedRating?: number } }
 
     const sessions: SessionData[] = sessionsSnapshot.docs.map((doc: admin.firestore.QueryDocumentSnapshot) => doc.data() as SessionData);
@@ -281,10 +284,17 @@ export async function getAnalytics(uid: string) {
         monthlyMap[key] = 0;
     }
     completedSessions.forEach((s: SessionData) => {
-        const date = s.endTime || s.createdAt;
-        if (date) {
-            const key = date.substring(0, 7);
-            if (key in monthlyMap) monthlyMap[key]++;
+        const raw = s.endTime || s.createdAt;
+        if (raw) {
+            let key = '';
+            // Handle Firestore Timestamp objects
+            if (raw && typeof raw === 'object' && typeof (raw as { toDate?: () => Date }).toDate === 'function') {
+                const d = (raw as { toDate: () => Date }).toDate();
+                key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            } else if (typeof raw === 'string') {
+                key = raw.substring(0, 7);
+            }
+            if (key && key in monthlyMap) monthlyMap[key]++;
         }
     });
     const monthlySessionTrend = Object.entries(monthlyMap).map(([month, count]) => ({ month, count }));
@@ -293,6 +303,13 @@ export async function getAnalytics(uid: string) {
     const recentRatings = ratingsSnapshot.docs
         .map((doc: admin.firestore.QueryDocumentSnapshot) => {
             const d = doc.data();
+            // Convert Firestore Timestamp to ISO string safely
+            let createdAtStr = '';
+            if (d.createdAt && typeof d.createdAt.toDate === 'function') {
+                createdAtStr = d.createdAt.toDate().toISOString();
+            } else if (typeof d.createdAt === 'string') {
+                createdAtStr = d.createdAt;
+            }
             return {
                 ratingId: doc.id,
                 studentId: d.studentId || '',
@@ -300,11 +317,11 @@ export async function getAnalytics(uid: string) {
                 starRating: d.metrics?.studentStarRating || 0,
                 feedback: d.metrics?.feedbackText || '',
                 scoreDelta: d.metrics?.scoreDelta || 0,
-                createdAt: d.createdAt || '',
+                createdAt: createdAtStr,
             };
         })
         .sort((a: { createdAt: string }, b: { createdAt: string }) => {
-            return (b.createdAt || '').localeCompare(a.createdAt || '');
+            return b.createdAt.localeCompare(a.createdAt);
         })
         .slice(0, 10);
 

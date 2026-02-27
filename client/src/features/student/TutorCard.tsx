@@ -89,10 +89,18 @@ export default function TutorCard({
                             <p className="text-xs text-slate-500 mt-0.5">{qualification}</p>
                         )}
                         <div className="mt-0.5 flex items-center gap-1">
-                            {renderStars(rating)}
-                            <span className="ml-1 text-xs text-slate-500">
-                                ({rating.toFixed(1)})
-                            </span>
+                            {rating > 0 ? (
+                                <>
+                                    {renderStars(rating)}
+                                    <span className="ml-1 text-xs text-slate-500">
+                                        ({rating.toFixed(1)})
+                                    </span>
+                                </>
+                            ) : (
+                                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
+                                    New Tutor
+                                </span>
+                            )}
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1.5">
                             {subjects.slice(0, 3).map((subject) => (

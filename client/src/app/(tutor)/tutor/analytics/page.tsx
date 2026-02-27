@@ -38,13 +38,20 @@ export default function TutorAnalyticsPage() {
         if (!firebaseUser) return;
         const fetchAnalytics = async () => {
             try {
-                const res = await fetch(`${API_BASE}/api/tutor/analytics/${firebaseUser.uid}`);
+                const url = `${API_BASE}/api/tutor/analytics/${firebaseUser.uid}`;
+                console.log('[TutorAnalytics] Fetching:', url);
+                const res = await fetch(url);
+                console.log('[TutorAnalytics] Response status:', res.status);
                 if (res.ok) {
-                    const { data } = await res.json();
-                    setAnalytics(data);
+                    const json = await res.json();
+                    console.log('[TutorAnalytics] Data received:', json.data);
+                    setAnalytics(json.data);
+                } else {
+                    const errText = await res.text();
+                    console.error('[TutorAnalytics] API error:', res.status, errText);
                 }
-            } catch {
-                // silent
+            } catch (err) {
+                console.error('[TutorAnalytics] Fetch error:', err);
             } finally {
                 setLoading(false);
             }
@@ -217,8 +224,8 @@ export default function TutorAnalyticsPage() {
                                     <div className="flex items-center gap-2">
                                         {rating.scoreDelta !== 0 && (
                                             <span className={`flex items-center gap-0.5 text-xs font-medium px-2 py-0.5 rounded-full ${rating.scoreDelta > 0
-                                                    ? 'bg-emerald-50 text-emerald-600'
-                                                    : 'bg-red-50 text-red-500'
+                                                ? 'bg-emerald-50 text-emerald-600'
+                                                : 'bg-red-50 text-red-500'
                                                 }`}>
                                                 <TrendingUp className="h-3 w-3" />
                                                 {rating.scoreDelta > 0 ? '+' : ''}{(rating.scoreDelta * 100).toFixed(0)}%

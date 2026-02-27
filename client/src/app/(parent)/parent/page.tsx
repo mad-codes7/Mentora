@@ -1,13 +1,18 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/common/AuthContext';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import {
+    collection, query, where, getDocs, doc, getDoc,
+    updateDoc, onSnapshot, arrayUnion
+} from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { Session } from '@/config/types';
 import {
     Users, BookOpen, TrendingUp, CalendarDays,
-    Inbox, GraduationCap, Star, AlertCircle, Link2
+    Inbox, GraduationCap, Star, AlertCircle, Link2,
+    DollarSign, Search, CheckCircle2, Wifi, WifiOff,
+    Loader2
 } from 'lucide-react';
 
 interface StudentInfo {
@@ -16,6 +21,7 @@ interface StudentInfo {
     classLevel: string;
     examFocus: string[];
     parentCode?: string;
+    isInSession?: boolean;
 }
 
 interface ProgressEntry {
@@ -25,119 +31,219 @@ interface ProgressEntry {
 }
 
 export default function ParentDashboard() {
-    const { mentoraUser } = useAuth();
+    const { mentoraUser, firebaseUser, refreshUserData } = useAuth();
     const [linkedStudents, setLinkedStudents] = useState<StudentInfo[]>([]);
     const [studentSessions, setStudentSessions] = useState<Session[]>([]);
     const [progressData, setProgressData] = useState<ProgressEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    // Link student state
+    const [parentCode, setParentCode] = useState('');
+    const [linking, setLinking] = useState(false);
+    const [linkSuccess, setLinkSuccess] = useState('');
+    const [linkError, setLinkError] = useState('');
+
+    // Spending
+    const [totalSpent, setTotalSpent] = useState(0);
+
     const parentName = mentoraUser?.profile?.fullName?.split(' ')[0] || 'Parent';
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-    useEffect(() => {
-        const fetchParentData = async () => {
-            if (!mentoraUser) return;
+    // ── Link Student Handler ──
+    const handleLinkStudent = async () => {
+        if (!parentCode.trim() || !firebaseUser) return;
+        setLinking(true);
+        setLinkError('');
+        setLinkSuccess('');
 
-            try {
-                setLoading(true);
-                setError(null);
+        try {
+            // Find student by parentCode
+            const usersQuery = query(
+                collection(db, 'users'),
+                where('studentData.parentCode', '==', parentCode.trim())
+            );
+            const snap = await getDocs(usersQuery);
 
-                const linkedIds = mentoraUser.parentData?.linkedStudentIds || [];
-
-                if (linkedIds.length === 0) {
-                    setLoading(false);
-                    return;
-                }
-
-                // Fetch linked student info
-                const students: StudentInfo[] = [];
-                for (const sid of linkedIds) {
-                    try {
-                        const studentDoc = await getDoc(doc(db, 'users', sid));
-                        if (studentDoc.exists()) {
-                            const data = studentDoc.data();
-                            students.push({
-                                uid: sid,
-                                fullName: data.profile?.fullName || data.displayName || 'Student',
-                                classLevel: data.studentData?.classLevel || 'N/A',
-                                examFocus: data.studentData?.examFocus || [],
-                                parentCode: data.studentData?.parentCode,
-                            });
-                        }
-                    } catch {
-                        // Skip failed lookups
-                    }
-                }
-                setLinkedStudents(students);
-
-                // Fetch sessions for all linked students
-                if (linkedIds.length > 0) {
-                    const sessionsQuery = query(
-                        collection(db, 'sessions'),
-                        where('studentId', 'in', linkedIds)
-                    );
-                    const sessionsSnap = await getDocs(sessionsQuery);
-                    const sessions = sessionsSnap.docs.map(d => ({
-                        sessionId: d.id,
-                        ...d.data(),
-                    })) as Session[];
-
-                    // Sort by createdAt descending
-                    sessions.sort((a, b) => {
-                        const timeA = a.createdAt?.toDate?.()?.getTime?.() || 0;
-                        const timeB = b.createdAt?.toDate?.()?.getTime?.() || 0;
-                        return timeB - timeA;
-                    });
-
-                    setStudentSessions(sessions.slice(0, 10));
-
-                    // Fetch assessment progress
-                    const assessQuery = query(
-                        collection(db, 'assessments'),
-                        where('userId', 'in', linkedIds)
-                    );
-                    const assessSnap = await getDocs(assessQuery);
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const assessments = assessSnap.docs.map(d => d.data()) as any[];
-
-                    const bySession: Record<string, { pre?: number; post?: number; topic?: string }> = {};
-                    assessments.forEach(a => {
-                        const key = a.sessionId || 'unknown';
-                        if (!bySession[key]) bySession[key] = {};
-                        const pct = a.scoreData?.totalScore != null && a.scoreData?.maxScore
-                            ? Math.round((a.scoreData.totalScore / a.scoreData.maxScore) * 100)
-                            : 0;
-                        if (a.type === 'pre_session') {
-                            bySession[key].pre = pct;
-                            bySession[key].topic = a.topic;
-                        } else {
-                            bySession[key].post = pct;
-                        }
-                    });
-
-                    const progress = Object.values(bySession)
-                        .filter(v => v.pre !== undefined || v.post !== undefined)
-                        .map(v => ({
-                            topic: v.topic || 'Quiz',
-                            preScore: v.pre || 0,
-                            postScore: v.post || 0,
-                        }))
-                        .slice(0, 6);
-
-                    setProgressData(progress);
-                }
-            } catch (err) {
-                console.error('Error fetching parent data:', err);
-                setError('Failed to load data. Please try again.');
-            } finally {
-                setLoading(false);
+            if (snap.empty) {
+                setLinkError('No student found with that code. Please check and try again.');
+                setLinking(false);
+                return;
             }
-        };
 
-        fetchParentData();
+            const studentDoc = snap.docs[0];
+            const studentId = studentDoc.id;
+
+            // Check if already linked
+            const currentLinked = mentoraUser?.parentData?.linkedStudentIds || [];
+            if (currentLinked.includes(studentId)) {
+                setLinkError('This student is already linked to your account.');
+                setLinking(false);
+                return;
+            }
+
+            // Update parent doc
+            await updateDoc(doc(db, 'users', firebaseUser.uid), {
+                'parentData.linkedStudentIds': arrayUnion(studentId),
+            });
+
+            // Update student doc
+            await updateDoc(doc(db, 'users', studentId), {
+                'studentData.linkedParentIds': arrayUnion(firebaseUser.uid),
+            });
+
+            const sData = studentDoc.data();
+            setLinkSuccess(`Successfully linked ${sData.profile?.fullName || 'Student'}!`);
+            setParentCode('');
+
+            // Refresh data
+            await refreshUserData();
+            // fetchParentData will re-run via useEffect
+        } catch (err) {
+            console.error('Error linking student:', err);
+            setLinkError('Failed to link student. Please try again.');
+        } finally {
+            setLinking(false);
+        }
+    };
+
+    // ── Fetch Data ──
+    const fetchParentData = useCallback(async () => {
+        if (!mentoraUser) return;
+
+        try {
+            setLoading(true);
+            setError(null);
+
+            const linkedIds = mentoraUser.parentData?.linkedStudentIds || [];
+
+            if (linkedIds.length === 0) {
+                setLoading(false);
+                return;
+            }
+
+            // Fetch linked student info
+            const students: StudentInfo[] = [];
+            for (const sid of linkedIds) {
+                try {
+                    const studentDoc = await getDoc(doc(db, 'users', sid));
+                    if (studentDoc.exists()) {
+                        const data = studentDoc.data();
+                        students.push({
+                            uid: sid,
+                            fullName: data.profile?.fullName || data.displayName || 'Student',
+                            classLevel: data.studentData?.classLevel || 'N/A',
+                            examFocus: data.studentData?.examFocus || [],
+                            parentCode: data.studentData?.parentCode,
+                            isInSession: false,
+                        });
+                    }
+                } catch {
+                    // Skip failed lookups
+                }
+            }
+            setLinkedStudents(students);
+
+            // Fetch sessions for all linked students
+            if (linkedIds.length > 0) {
+                const sessionsQuery = query(
+                    collection(db, 'sessions'),
+                    where('studentId', 'in', linkedIds)
+                );
+                const sessionsSnap = await getDocs(sessionsQuery);
+                const sessions = sessionsSnap.docs.map(d => ({
+                    sessionId: d.id,
+                    ...d.data(),
+                })) as Session[];
+
+                // Sort by createdAt descending
+                sessions.sort((a, b) => {
+                    const timeA = a.createdAt?.toDate?.()?.getTime?.() || 0;
+                    const timeB = b.createdAt?.toDate?.()?.getTime?.() || 0;
+                    return timeB - timeA;
+                });
+
+                setStudentSessions(sessions.slice(0, 10));
+
+                // Calculate total spending
+                const paidSessions = sessions.filter(s => s.paymentStatus === 'success');
+                const spent = paidSessions.reduce((sum, s) => {
+                    return sum + (s.durationLimitMinutes || 60) * (200 / 60); // approximate
+                }, 0);
+                setTotalSpent(Math.round(spent));
+
+                // Fetch assessment progress
+                const assessQuery = query(
+                    collection(db, 'assessments'),
+                    where('userId', 'in', linkedIds)
+                );
+                const assessSnap = await getDocs(assessQuery);
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const assessments = assessSnap.docs.map(d => d.data()) as any[];
+
+                const bySession: Record<string, { pre?: number; post?: number; topic?: string }> = {};
+                assessments.forEach(a => {
+                    const key = a.sessionId || 'unknown';
+                    if (!bySession[key]) bySession[key] = {};
+                    const pct = a.scoreData?.totalScore != null && a.scoreData?.maxScore
+                        ? Math.round((a.scoreData.totalScore / a.scoreData.maxScore) * 100)
+                        : 0;
+                    if (a.type === 'pre_session') {
+                        bySession[key].pre = pct;
+                        bySession[key].topic = a.topic;
+                    } else {
+                        bySession[key].post = pct;
+                    }
+                });
+
+                const progress = Object.values(bySession)
+                    .filter(v => v.pre !== undefined || v.post !== undefined)
+                    .map(v => ({
+                        topic: v.topic || 'Quiz',
+                        preScore: v.pre || 0,
+                        postScore: v.post || 0,
+                    }))
+                    .slice(0, 6);
+
+                setProgressData(progress);
+            }
+        } catch (err) {
+            console.error('Error fetching parent data:', err);
+            setError('Failed to load data. Please try again.');
+        } finally {
+            setLoading(false);
+        }
     }, [mentoraUser]);
+
+    useEffect(() => {
+        fetchParentData();
+    }, [fetchParentData]);
+
+    // ── Live Session Status Listener ──
+    useEffect(() => {
+        const linkedIds = mentoraUser?.parentData?.linkedStudentIds || [];
+        if (linkedIds.length === 0) return;
+
+        // Listen for in_progress sessions for linked students
+        const sessionsQuery = query(
+            collection(db, 'sessions'),
+            where('studentId', 'in', linkedIds),
+            where('status', '==', 'in_progress')
+        );
+
+        const unsubscribe = onSnapshot(sessionsQuery, (snapshot) => {
+            const activeStudentIds = new Set(snapshot.docs.map(d => d.data().studentId));
+            setLinkedStudents(prev =>
+                prev.map(s => ({
+                    ...s,
+                    isInSession: activeStudentIds.has(s.uid),
+                }))
+            );
+        });
+
+        return () => unsubscribe();
+    }, [mentoraUser?.parentData?.linkedStudentIds]);
 
     const getStatusBadge = (status: string) => {
         const styles: Record<string, { bg: string; text: string; label: string }> = {
@@ -204,6 +310,12 @@ export default function ParentDashboard() {
                         </div>
                         <div className="w-px bg-white/20" />
                         <div className="text-center flex flex-col items-center">
+                            <DollarSign className="h-5 w-5 text-amber-200 mb-1" />
+                            <p className="text-2xl font-bold">₹{totalSpent}</p>
+                            <p className="text-xs text-amber-200 mt-0.5">Spent</p>
+                        </div>
+                        <div className="w-px bg-white/20" />
+                        <div className="text-center flex flex-col items-center">
                             <Star className="h-5 w-5 text-amber-200 mb-1" />
                             <p className="text-2xl font-bold">{completedCount}</p>
                             <p className="text-xs text-amber-200 mt-0.5">Completed</p>
@@ -212,25 +324,51 @@ export default function ParentDashboard() {
                 </div>
             </div>
 
-            {/* ── No Linked Students ── */}
-            {linkedIds.length === 0 && (
-                <div className="card p-10 text-center animate-fade-in-up">
-                    <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-amber-50 mb-6">
-                        <Link2 className="h-10 w-10 text-amber-500" />
-                    </div>
-                    <h2 className="text-2xl font-bold text-slate-900 mb-3">
-                        Link Your Child&apos;s Account
-                    </h2>
-                    <p className="text-slate-500 max-w-md mx-auto mb-6">
-                        Ask your child to share their 6-digit parent code from their profile page.
-                        Once linked, you&apos;ll be able to see their sessions and progress here.
-                    </p>
-                    <a href="/profile-setup" className="btn-primary inline-block"
-                        style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }}>
-                        Link Student Account →
-                    </a>
+            {/* ── Link Student Card ── */}
+            <div className="card p-6 animate-fade-in-up">
+                <div className="flex items-center gap-2 mb-4">
+                    <Link2 className="h-4 w-4 text-amber-600" />
+                    <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Link a Student</h2>
                 </div>
-            )}
+                <p className="text-sm text-slate-500 mb-4">
+                    Enter your child&apos;s 6-digit parent code from their profile to link their account.
+                </p>
+                <div className="flex gap-3">
+                    <div className="relative flex-1 max-w-xs">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        <input
+                            type="text"
+                            value={parentCode}
+                            onChange={(e) => setParentCode(e.target.value.toUpperCase())}
+                            placeholder="e.g. A3F9K2"
+                            maxLength={6}
+                            className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4 text-sm font-mono tracking-widest text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-400 transition-all"
+                        />
+                    </div>
+                    <button
+                        onClick={handleLinkStudent}
+                        disabled={linking || parentCode.trim().length === 0}
+                        className="rounded-xl px-6 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 flex items-center gap-2"
+                        style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }}
+                    >
+                        {linking ? (
+                            <><Loader2 className="h-4 w-4 animate-spin" /> Linking...</>
+                        ) : (
+                            <>Link Student</>
+                        )}
+                    </button>
+                </div>
+                {linkSuccess && (
+                    <div className="mt-3 flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 rounded-xl px-4 py-2.5">
+                        <CheckCircle2 className="h-4 w-4" /> {linkSuccess}
+                    </div>
+                )}
+                {linkError && (
+                    <div className="mt-3 flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2.5">
+                        <AlertCircle className="h-4 w-4" /> {linkError}
+                    </div>
+                )}
+            </div>
 
             {error && (
                 <div className="card p-6 border-red-100">
@@ -241,7 +379,7 @@ export default function ParentDashboard() {
                 </div>
             )}
 
-            {/* ── Linked Students ── */}
+            {/* ── Linked Students with Live Status ── */}
             {linkedStudents.length > 0 && (
                 <section>
                     <div className="flex items-center gap-2 mb-4">
@@ -252,13 +390,30 @@ export default function ParentDashboard() {
                         {linkedStudents.map((student) => (
                             <div key={student.uid} className="card p-5 card-interactive">
                                 <div className="flex items-center gap-3 mb-3">
-                                    <div className="flex h-12 w-12 items-center justify-center rounded-xl text-sm font-bold text-white"
-                                        style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }}>
-                                        {student.fullName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                                    <div className="relative">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-xl text-sm font-bold text-white"
+                                            style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }}>
+                                            {student.fullName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                                        </div>
+                                        {/* Live Status Indicator */}
+                                        <div className={`absolute -bottom-1 -right-1 flex items-center justify-center h-5 w-5 rounded-full border-2 border-white ${student.isInSession ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                            {student.isInSession
+                                                ? <Wifi className="h-3 w-3 text-white" />
+                                                : <WifiOff className="h-2.5 w-2.5 text-white" />
+                                            }
+                                        </div>
                                     </div>
                                     <div>
                                         <p className="font-bold text-slate-900">{student.fullName}</p>
-                                        <p className="text-xs text-slate-400">{student.classLevel}</p>
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-xs text-slate-400">{student.classLevel}</p>
+                                            {student.isInSession && (
+                                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-600 animate-pulse">
+                                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                                    In Session
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                                 {student.examFocus.length > 0 && (
@@ -274,6 +429,22 @@ export default function ParentDashboard() {
                         ))}
                     </div>
                 </section>
+            )}
+
+            {/* ── No Linked Students ── */}
+            {linkedIds.length === 0 && (
+                <div className="card p-10 text-center animate-fade-in-up">
+                    <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-amber-50 mb-6">
+                        <Link2 className="h-10 w-10 text-amber-500" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-slate-900 mb-3">
+                        Link Your Child&apos;s Account
+                    </h2>
+                    <p className="text-slate-500 max-w-md mx-auto mb-2">
+                        Ask your child to share their 6-digit parent code from their profile page.
+                        Use the form above to link their account.
+                    </p>
+                </div>
             )}
 
             {/* ── Recent Sessions ── */}

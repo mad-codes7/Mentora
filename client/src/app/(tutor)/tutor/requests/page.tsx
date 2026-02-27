@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/common/AuthContext';
 import { useSessions } from '@/hooks/useSessions';
-import { Bell, CheckCircle, X, Clock, Users, CalendarDays, Inbox, Video } from 'lucide-react';
+import { Bell, CheckCircle, X, Clock, Users, CalendarDays, Inbox, Video, Check } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000';
 
@@ -22,6 +22,7 @@ export default function TutorRequestsPage() {
     const { firebaseUser } = useAuth();
     const { acceptSession, updateSessionStatus } = useSessions();
     const [requests, setRequests] = useState<BookingRequest[]>([]);
+    const [acceptedSessions, setAcceptedSessions] = useState<BookingRequest[]>([]);
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -40,10 +41,29 @@ export default function TutorRequestsPage() {
         }
     };
 
+    const fetchAcceptedSessions = async () => {
+        if (!firebaseUser) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/tutor/sessions/${firebaseUser.uid}?status=paid_waiting`);
+            if (res.ok) {
+                const { data } = await res.json();
+                // Only show scheduled sessions (slot bookings) in the accepted section
+                const scheduled = (data || []).filter((s: BookingRequest) => s.scheduledStartTime);
+                setAcceptedSessions(scheduled);
+            }
+        } catch {
+            // silent
+        }
+    };
+
     useEffect(() => {
         fetchRequests();
+        fetchAcceptedSessions();
         // Poll every 30 seconds for new requests
-        const interval = setInterval(fetchRequests, 30000);
+        const interval = setInterval(() => {
+            fetchRequests();
+            fetchAcceptedSessions();
+        }, 30000);
         return () => clearInterval(interval);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [firebaseUser]);
@@ -52,8 +72,9 @@ export default function TutorRequestsPage() {
         try {
             setActionLoading(sessionId);
             await acceptSession(sessionId);
-            // Remove from local state
-            setRequests(prev => prev.filter(r => r.sessionId !== sessionId));
+            // Refresh both lists
+            await fetchRequests();
+            await fetchAcceptedSessions();
         } catch {
             alert('Failed to accept request');
         } finally {
@@ -99,6 +120,19 @@ export default function TutorRequestsPage() {
         return diffMins >= -5 && diffMins <= 120; // within 5 min before to 2 hours after
     };
 
+    const getTimeUntil = (scheduledTime?: string) => {
+        if (!scheduledTime) return '';
+        const now = new Date();
+        const scheduled = new Date(scheduledTime);
+        const diff = scheduled.getTime() - now.getTime();
+        if (diff <= 0) return 'Starting soon';
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        return `${minutes}m`;
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -124,7 +158,8 @@ export default function TutorRequestsPage() {
                 )}
             </div>
 
-            {requests.length === 0 ? (
+            {/* ── Pending Requests ── */}
+            {requests.length === 0 && acceptedSessions.length === 0 ? (
                 <div className="card p-12 text-center">
                     <div className="flex flex-col items-center">
                         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 animate-float">
@@ -137,79 +172,138 @@ export default function TutorRequestsPage() {
                     </div>
                 </div>
             ) : (
-                <div className="flex flex-col gap-4">
-                    {requests.map((request) => (
-                        <div
-                            key={request.sessionId}
-                            className="card p-6 card-interactive transition-all border-l-4"
-                            style={{ borderLeftColor: 'var(--warning)' }}
-                        >
-                            <div className="flex items-start justify-between gap-4">
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-3 mb-2">
-                                        <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-                                            {request.topic || 'General'}
-                                        </h3>
-                                        <span className="badge badge-warning">⏳ Pending Approval</span>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
-                                        <span className="flex items-center gap-1">
-                                            <Users className="h-3.5 w-3.5" />
-                                            {request.studentName || 'Student'}
-                                        </span>
-                                        <span className="flex items-center gap-1">
-                                            <CalendarDays className="h-3.5 w-3.5" />
-                                            {formatDateTime(request.scheduledStartTime)}
-                                        </span>
-                                        <span className="flex items-center gap-1">
-                                            <Clock className="h-3.5 w-3.5" />
-                                            {request.durationLimitMinutes} min
-                                        </span>
-                                    </div>
-                                    <p className="mt-1 text-xs text-slate-400">
-                                        Requested {formatDateTime(request.createdAt)}
-                                    </p>
-                                </div>
+                <div className="flex flex-col gap-6">
+                    {/* Pending Requests */}
+                    {requests.length > 0 && (
+                        <div className="flex flex-col gap-4">
+                            <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
+                                <Clock className="h-4.5 w-4.5 text-amber-500" />
+                                Pending Approval ({requests.length})
+                            </h2>
+                            {requests.map((request) => (
+                                <div
+                                    key={request.sessionId}
+                                    className="card p-6 card-interactive transition-all border-l-4"
+                                    style={{ borderLeftColor: 'var(--warning)' }}
+                                >
+                                    <div className="flex items-start justify-between gap-4">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-3 mb-2">
+                                                <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                                    {request.topic || 'General'}
+                                                </h3>
+                                                <span className="badge badge-warning">⏳ Pending Approval</span>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
+                                                <span className="flex items-center gap-1">
+                                                    <Users className="h-3.5 w-3.5" />
+                                                    {request.studentName || 'Student'}
+                                                </span>
+                                                <span className="flex items-center gap-1">
+                                                    <CalendarDays className="h-3.5 w-3.5" />
+                                                    {formatDateTime(request.scheduledStartTime)}
+                                                </span>
+                                                <span className="flex items-center gap-1">
+                                                    <Clock className="h-3.5 w-3.5" />
+                                                    {request.durationLimitMinutes} min
+                                                </span>
+                                            </div>
+                                            <p className="mt-1 text-xs text-slate-400">
+                                                Requested {formatDateTime(request.createdAt)}
+                                            </p>
+                                        </div>
 
-                                <div className="flex gap-2 shrink-0">
-                                    {isSessionTime(request.scheduledStartTime) && (
-                                        <button
-                                            className="btn-primary text-sm flex items-center gap-1"
-                                            onClick={() => {
-                                                window.location.href = `/room/${request.sessionId}`;
-                                            }}
-                                        >
-                                            <Video className="h-3.5 w-3.5" />
-                                            Join
-                                        </button>
-                                    )}
-                                    <button
-                                        className="btn-primary text-sm flex items-center gap-1"
-                                        disabled={actionLoading === request.sessionId}
-                                        onClick={() => handleAccept(request.sessionId)}
-                                    >
-                                        {actionLoading === request.sessionId ? (
-                                            '...'
-                                        ) : (
-                                            <>
-                                                <CheckCircle className="h-3.5 w-3.5" />
-                                                Accept
-                                            </>
-                                        )}
-                                    </button>
-                                    <button
-                                        className="btn-secondary text-sm flex items-center gap-1"
-                                        style={{ color: 'var(--error)', borderColor: 'rgba(239,68,68,0.3)' }}
-                                        disabled={actionLoading === request.sessionId}
-                                        onClick={() => handleDecline(request.sessionId)}
-                                    >
-                                        <X className="h-3.5 w-3.5" />
-                                        Decline
-                                    </button>
+                                        <div className="flex gap-2 shrink-0">
+                                            <button
+                                                className="btn-primary text-sm flex items-center gap-1"
+                                                disabled={actionLoading === request.sessionId}
+                                                onClick={() => handleAccept(request.sessionId)}
+                                            >
+                                                {actionLoading === request.sessionId ? (
+                                                    '...'
+                                                ) : (
+                                                    <>
+                                                        <CheckCircle className="h-3.5 w-3.5" />
+                                                        Accept
+                                                    </>
+                                                )}
+                                            </button>
+                                            <button
+                                                className="btn-secondary text-sm flex items-center gap-1"
+                                                style={{ color: 'var(--error)', borderColor: 'rgba(239,68,68,0.3)' }}
+                                                disabled={actionLoading === request.sessionId}
+                                                onClick={() => handleDecline(request.sessionId)}
+                                            >
+                                                <X className="h-3.5 w-3.5" />
+                                                Decline
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
+                            ))}
                         </div>
-                    ))}
+                    )}
+
+                    {/* Accepted Sessions */}
+                    {acceptedSessions.length > 0 && (
+                        <div className="flex flex-col gap-4">
+                            <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
+                                <Check className="h-4.5 w-4.5 text-emerald-500" />
+                                Accepted Sessions ({acceptedSessions.length})
+                            </h2>
+                            {acceptedSessions.map((session) => (
+                                <div
+                                    key={session.sessionId}
+                                    className="card p-6 card-interactive transition-all border-l-4"
+                                    style={{ borderLeftColor: 'var(--success)' }}
+                                >
+                                    <div className="flex items-start justify-between gap-4">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-3 mb-2">
+                                                <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                                    {session.topic || 'General'}
+                                                </h3>
+                                                <span className="badge badge-success">✓ Accepted</span>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
+                                                <span className="flex items-center gap-1">
+                                                    <Users className="h-3.5 w-3.5" />
+                                                    {session.studentName || 'Student'}
+                                                </span>
+                                                <span className="flex items-center gap-1">
+                                                    <CalendarDays className="h-3.5 w-3.5" />
+                                                    {formatDateTime(session.scheduledStartTime)}
+                                                </span>
+                                                <span className="flex items-center gap-1">
+                                                    <Clock className="h-3.5 w-3.5" />
+                                                    {session.durationLimitMinutes} min
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex gap-2 shrink-0">
+                                            {isSessionTime(session.scheduledStartTime) ? (
+                                                <button
+                                                    className="btn-primary text-sm flex items-center gap-1.5 animate-pulse"
+                                                    onClick={() => {
+                                                        window.location.href = `/room/${session.sessionId}`;
+                                                    }}
+                                                >
+                                                    <Video className="h-3.5 w-3.5" />
+                                                    Join Session
+                                                </button>
+                                            ) : (
+                                                <span className="text-xs text-indigo-500 font-medium px-3 py-2 rounded-lg bg-indigo-50 flex items-center gap-1.5">
+                                                    <Clock className="h-3 w-3" />
+                                                    Starts in {getTimeUntil(session.scheduledStartTime)}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
         </div>

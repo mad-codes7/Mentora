@@ -4,6 +4,9 @@ dotenv.config();
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import tutorRoutes from './routes/tutorRoutes';
+import studentRoutes from './routes/studentRoutes';
+import parentRoutes from './routes/parentRoutes';
+import aiRoutes from './routes/aiRoutes';
 
 
 const app = express();
@@ -24,6 +27,9 @@ app.get('/api/health', (req: Request, res: Response) => {
 
 // Module routes
 app.use('/api/tutor', tutorRoutes);
+app.use('/api/student', studentRoutes);
+app.use('/api/parent', parentRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Start server
 app.listen(PORT, () => {

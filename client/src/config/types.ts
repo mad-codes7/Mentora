@@ -23,6 +23,7 @@ export interface TutorAvailability {
 
 export interface TutorData {
     isVerified: boolean;
+    isActive?: boolean;
     subjects: string[];
     availability: TutorAvailability[];
     teachingMode: 'Online' | 'Offline' | 'Both';

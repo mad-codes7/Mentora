@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/common/AuthContext';
 import { useState } from 'react';
-import { LayoutDashboard, LogOut, ArrowLeftRight } from 'lucide-react';
+import { LayoutDashboard, LogOut, ArrowLeftRight, BarChart3, UserCheck } from 'lucide-react';
 
 export default function ParentLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
@@ -114,6 +114,32 @@ export default function ParentLayout({ children }: { children: React.ReactNode }
                             <LayoutDashboard className="h-4 w-4" />
                             Dashboard
                             {pathname === '/parent' && (
+                                <span className="absolute bottom-0 left-1/2 h-0.5 w-8 -translate-x-1/2 rounded-full" style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }} />
+                            )}
+                        </Link>
+                        <Link
+                            href="/parent/analytics"
+                            className={`relative flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ${pathname === '/parent/analytics'
+                                ? 'text-amber-700 bg-amber-50'
+                                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+                                }`}
+                        >
+                            <BarChart3 className="h-4 w-4" />
+                            Analytics
+                            {pathname === '/parent/analytics' && (
+                                <span className="absolute bottom-0 left-1/2 h-0.5 w-8 -translate-x-1/2 rounded-full" style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }} />
+                            )}
+                        </Link>
+                        <Link
+                            href="/parent/reviews"
+                            className={`relative flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ${pathname === '/parent/reviews'
+                                ? 'text-amber-700 bg-amber-50'
+                                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+                                }`}
+                        >
+                            <UserCheck className="h-4 w-4" />
+                            Reviews
+                            {pathname === '/parent/reviews' && (
                                 <span className="absolute bottom-0 left-1/2 h-0.5 w-8 -translate-x-1/2 rounded-full" style={{ background: 'linear-gradient(135deg, #d97706, #b45309)' }} />
                             )}
                         </Link>
