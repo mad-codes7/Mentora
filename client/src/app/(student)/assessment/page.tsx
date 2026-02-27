@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/common/AuthContext';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { fetchQuizQuestions, QuizApiQuestion } from '@/config/mockQuizApi';
 import QuizCard from '@/features/student/QuizCard';
@@ -114,6 +114,10 @@ function AssessmentContent() {
             }
 
             if (type === 'post_session' && sessionId) {
+                // Link the post-assessment to the session
+                await updateDoc(doc(db, 'sessions', sessionId), {
+                    postAssessmentId: docRef.id,
+                });
                 setTimeout(() => {
                     router.push(`/post-session/${sessionId}?assessmentId=${docRef.id}`);
                 }, 2000);

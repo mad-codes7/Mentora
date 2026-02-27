@@ -123,7 +123,13 @@ export default function RoomPage({ params }: RoomPageProps) {
 
             // Small delay to show "Call ended" overlay
             setTimeout(() => {
-                router.push(isTutor ? '/tutor/sessions' : `/post-session/${sessionId}`);
+                if (isTutor) {
+                    router.push('/tutor/sessions');
+                } else {
+                    // Student goes to post-assessment quiz first, then to rating page
+                    const topic = encodeURIComponent(session.topic || 'General');
+                    router.push(`/assessment?type=post_session&topic=${topic}&sessionId=${sessionId}`);
+                }
             }, 2000);
         };
 

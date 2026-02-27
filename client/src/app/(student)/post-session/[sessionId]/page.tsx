@@ -25,14 +25,38 @@ export default function PostSessionPage({
     const [submitted, setSubmitted] = useState(false);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [session, setSession] = useState<any>(null);
+    const [preScore, setPreScore] = useState<{ total: number; max: number } | null>(null);
+    const [postScore, setPostScore] = useState<{ total: number; max: number } | null>(null);
 
     useEffect(() => {
         const loadSession = async () => {
             const snap = await getDoc(doc(db, 'sessions', sessionId));
-            if (snap.exists()) setSession(snap.data());
+            if (snap.exists()) {
+                const sData = snap.data();
+                setSession(sData);
+
+                // Load pre-assessment score
+                if (sData.preAssessmentId) {
+                    const preSnap = await getDoc(doc(db, 'assessments', sData.preAssessmentId));
+                    if (preSnap.exists()) {
+                        const d = preSnap.data();
+                        setPreScore({ total: d.scoreData.totalScore, max: d.scoreData.maxScore });
+                    }
+                }
+
+                // Load post-assessment score
+                const postId = assessmentId || sData.postAssessmentId;
+                if (postId) {
+                    const postSnap = await getDoc(doc(db, 'assessments', postId));
+                    if (postSnap.exists()) {
+                        const d = postSnap.data();
+                        setPostScore({ total: d.scoreData.totalScore, max: d.scoreData.maxScore });
+                    }
+                }
+            }
         };
         loadSession();
-    }, [sessionId]);
+    }, [sessionId, assessmentId]);
 
     const handleSubmit = async () => {
         if (!firebaseUser || !session || rating === 0) return;
@@ -130,6 +154,56 @@ export default function PostSessionPage({
                 <p className="mt-2 text-slate-400 text-sm">How was your learning experience?</p>
             </div>
 
+            {/* Score Comparison */}
+            {(preScore || postScore) && (
+                <div className="card overflow-hidden mb-6">
+                    <div className="bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-3">
+                        <h3 className="text-sm font-semibold text-white">📊 Your Progress</h3>
+                    </div>
+                    <div className="p-6">
+                        <div className="flex items-center justify-around">
+                            {/* Pre Score */}
+                            <div className="text-center">
+                                <p className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Before</p>
+                                <p className="text-3xl font-black text-slate-700">
+                                    {preScore ? `${preScore.total}/${preScore.max}` : '—'}
+                                </p>
+                                <p className="text-[10px] text-slate-400 mt-1">Pre-Assessment</p>
+                            </div>
+
+                            {/* Arrow / Delta */}
+                            <div className="text-center px-4">
+                                {preScore && postScore ? (() => {
+                                    const delta = postScore.total - preScore.total;
+                                    const color = delta > 0 ? 'text-emerald-500' : delta < 0 ? 'text-red-500' : 'text-blue-500';
+                                    const arrow = delta > 0 ? '↑' : delta < 0 ? '↓' : '→';
+                                    const label = delta > 0 ? 'Improved!' : delta < 0 ? 'Needs work' : 'Consistent';
+                                    return (
+                                        <>
+                                            <p className={`text-2xl font-black ${color}`}>
+                                                {arrow} {delta > 0 ? '+' : ''}{delta}
+                                            </p>
+                                            <p className={`text-[10px] font-semibold ${color}`}>{label}</p>
+                                        </>
+                                    );
+                                })() : (
+                                    <p className="text-xl text-slate-300">→</p>
+                                )}
+                            </div>
+
+                            {/* Post Score */}
+                            <div className="text-center">
+                                <p className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">After</p>
+                                <p className="text-3xl font-black text-slate-700">
+                                    {postScore ? `${postScore.total}/${postScore.max}` : '—'}
+                                </p>
+                                <p className="text-[10px] text-slate-400 mt-1">Post-Assessment</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="card p-6 space-y-6">
                 {/* Star Rating */}
                 <div>
@@ -144,14 +218,14 @@ export default function PostSessionPage({
                                 onMouseEnter={() => setHoveredRating(star)}
                                 onMouseLeave={() => setHoveredRating(0)}
                                 className={`transition-all duration-200 ${star <= (hoveredRating || rating)
-                                        ? 'scale-110 drop-shadow-md'
-                                        : 'opacity-40 hover:opacity-60'
+                                    ? 'scale-110 drop-shadow-md'
+                                    : 'opacity-40 hover:opacity-60'
                                     }`}
                             >
                                 <Star
                                     className={`h-10 w-10 ${star <= (hoveredRating || rating)
-                                            ? 'text-amber-400 fill-amber-400'
-                                            : 'text-slate-300'
+                                        ? 'text-amber-400 fill-amber-400'
+                                        : 'text-slate-300'
                                         }`}
                                 />
                             </button>
