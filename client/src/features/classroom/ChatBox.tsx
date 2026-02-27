@@ -74,7 +74,7 @@ export default function ChatBox({ sessionId }: ChatBoxProps) {
     };
 
     return (
-        <div className="flex h-full flex-col border-l border-slate-200 bg-white">
+        <div className="flex flex-1 min-h-0 flex-col border-l border-slate-200 bg-white">
             {/* Header */}
             <div className="border-b border-slate-200 px-4 py-3">
                 <h3 className="text-sm font-semibold text-slate-900">Chat</h3>
@@ -96,8 +96,8 @@ export default function ChatBox({ sessionId }: ChatBoxProps) {
                             >
                                 <div
                                     className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${isMe
-                                            ? 'bg-blue-600 text-white'
-                                            : 'bg-slate-100 text-slate-900'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-slate-100 text-slate-900'
                                         }`}
                                 >
                                     {!isMe && (

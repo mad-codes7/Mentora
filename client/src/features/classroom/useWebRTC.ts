@@ -5,11 +5,9 @@ import {
     doc,
     collection,
     setDoc,
-    getDoc,
     onSnapshot,
     addDoc,
     updateDoc,
-    deleteDoc,
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 
@@ -25,10 +23,17 @@ interface UseWebRTCReturn {
     isConnected: boolean;
     isAudioMuted: boolean;
     isVideoOff: boolean;
+    isScreenSharing: boolean;
+    isFrontCamera: boolean;
+    isCallEnded: boolean;
+    endedBy: string | null;
     toggleAudio: () => void;
     toggleVideo: () => void;
     startCall: () => Promise<void>;
     endCall: () => void;
+    startScreenShare: () => Promise<void>;
+    stopScreenShare: () => void;
+    flipCamera: () => Promise<void>;
 }
 
 const ICE_SERVERS = {
@@ -46,10 +51,19 @@ export default function useWebRTC({
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const [isConnected, setIsConnected] = useState(false);
+    // ── DEFAULT ON — media flows immediately ──
     const [isAudioMuted, setIsAudioMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
+    const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const [isFrontCamera, setIsFrontCamera] = useState(true);
+    const [isCallEnded, setIsCallEnded] = useState(false);
+    const [endedBy, setEndedBy] = useState<string | null>(null);
+
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
+    const screenStreamRef = useRef<MediaStream | null>(null);
+    const originalVideoTrackRef = useRef<MediaStreamTrack | null>(null);
+    const endCallUnsubRef = useRef<(() => void) | null>(null);
 
     const cleanup = useCallback(() => {
         if (peerConnectionRef.current) {
@@ -60,40 +74,47 @@ export default function useWebRTC({
             localStreamRef.current.getTracks().forEach((track) => track.stop());
             localStreamRef.current = null;
         }
+        if (screenStreamRef.current) {
+            screenStreamRef.current.getTracks().forEach((track) => track.stop());
+            screenStreamRef.current = null;
+        }
+        if (endCallUnsubRef.current) {
+            endCallUnsubRef.current();
+            endCallUnsubRef.current = null;
+        }
         setLocalStream(null);
         setRemoteStream(null);
         setIsConnected(false);
+        setIsScreenSharing(false);
     }, []);
 
     const startCall = useCallback(async () => {
         try {
-            // Get user media
+            // Get user media — tracks start ENABLED so media flows immediately
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: true,
                 audio: true,
             });
+
             localStreamRef.current = stream;
             setLocalStream(stream);
+            setIsAudioMuted(false);
+            setIsVideoOff(false);
 
             // Create peer connection
             const pc = new RTCPeerConnection(ICE_SERVERS);
             peerConnectionRef.current = pc;
-
-            // Create remote stream
-            const remote = new MediaStream();
-            setRemoteStream(remote);
 
             // Add local tracks to peer connection
             stream.getTracks().forEach((track) => {
                 pc.addTrack(track, stream);
             });
 
-            // Listen for remote tracks
+            // Listen for remote tracks — use the stream WebRTC provides directly
             pc.ontrack = (event) => {
-                event.streams[0].getTracks().forEach((track) => {
-                    remote.addTrack(track);
-                });
-                setRemoteStream(new MediaStream(remote.getTracks()));
+                if (event.streams && event.streams[0]) {
+                    setRemoteStream(event.streams[0]);
+                }
             };
 
             // Connection state
@@ -197,32 +218,240 @@ export default function useWebRTC({
                     });
                 });
             }
+
+            // ── LISTEN FOR END-CALL SIGNAL ──
+            const endCallRef = doc(db, 'sessions', sessionId, 'signals', 'endCall');
+            endCallUnsubRef.current = onSnapshot(endCallRef, (snap) => {
+                if (snap.exists()) {
+                    const data = snap.data();
+                    if (data?.ended) {
+                        setIsCallEnded(true);
+                        setEndedBy(data.by || null);
+                        cleanup();
+                    }
+                }
+            });
         } catch (error) {
             console.error('WebRTC error:', error);
         }
-    }, [sessionId, isCaller]);
+    }, [sessionId, isCaller, cleanup]);
 
-    const toggleAudio = useCallback(() => {
-        if (localStreamRef.current) {
-            localStreamRef.current.getAudioTracks().forEach((track) => {
-                track.enabled = !track.enabled;
-            });
-            setIsAudioMuted((prev) => !prev);
+    const toggleAudio = useCallback(async () => {
+        if (!localStreamRef.current) return;
+
+        const audioTracks = localStreamRef.current.getAudioTracks();
+        const liveTrack = audioTracks.find(t => t.readyState === 'live');
+
+        if (liveTrack) {
+            // Track is alive, just toggle enabled
+            liveTrack.enabled = !liveTrack.enabled;
+            setIsAudioMuted(!liveTrack.enabled);
+        } else {
+            // Track is dead or missing — re-acquire audio
+            try {
+                const newStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const newTrack = newStream.getAudioTracks()[0];
+                newTrack.enabled = true;
+
+                // Remove old dead tracks
+                audioTracks.forEach(t => { t.stop(); localStreamRef.current!.removeTrack(t); });
+                localStreamRef.current.addTrack(newTrack);
+
+                // Replace on peer connection
+                const pc = peerConnectionRef.current;
+                if (pc) {
+                    const audioSender = pc.getSenders().find(s => s.track?.kind === 'audio' || (!s.track));
+                    if (audioSender) await audioSender.replaceTrack(newTrack);
+                    else pc.addTrack(newTrack, localStreamRef.current);
+                }
+
+                setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+                setIsAudioMuted(false);
+            } catch (err) {
+                console.error('Could not re-acquire audio:', err);
+            }
         }
     }, []);
 
-    const toggleVideo = useCallback(() => {
-        if (localStreamRef.current) {
-            localStreamRef.current.getVideoTracks().forEach((track) => {
-                track.enabled = !track.enabled;
-            });
-            setIsVideoOff((prev) => !prev);
+    const toggleVideo = useCallback(async () => {
+        if (!localStreamRef.current) return;
+
+        const videoTracks = localStreamRef.current.getVideoTracks();
+        const liveTrack = videoTracks.find(t => t.readyState === 'live');
+
+        if (liveTrack) {
+            // Track is alive, just toggle enabled
+            liveTrack.enabled = !liveTrack.enabled;
+            setIsVideoOff(!liveTrack.enabled);
+        } else {
+            // Track is dead or missing — re-acquire video
+            try {
+                const newStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const newTrack = newStream.getVideoTracks()[0];
+                newTrack.enabled = true;
+
+                // Remove old dead tracks
+                videoTracks.forEach(t => { t.stop(); localStreamRef.current!.removeTrack(t); });
+                localStreamRef.current.addTrack(newTrack);
+
+                // Replace on peer connection
+                const pc = peerConnectionRef.current;
+                if (pc) {
+                    const videoSender = pc.getSenders().find(s => s.track?.kind === 'video' || (!s.track));
+                    if (videoSender) await videoSender.replaceTrack(newTrack);
+                    else pc.addTrack(newTrack, localStreamRef.current);
+                }
+
+                setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+                setIsVideoOff(false);
+            } catch (err) {
+                console.error('Could not re-acquire video:', err);
+            }
         }
     }, []);
 
-    const endCall = useCallback(() => {
+    // ── SCREEN SHARE ──
+    const startScreenShare = useCallback(async () => {
+        try {
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+            });
+            screenStreamRef.current = screenStream;
+
+            const screenTrack = screenStream.getVideoTracks()[0];
+            const pc = peerConnectionRef.current;
+            if (!pc) return;
+
+            // Find the video sender and replace track
+            const videoSender = pc.getSenders().find(
+                (s) => s.track?.kind === 'video'
+            );
+            if (videoSender && localStreamRef.current) {
+                originalVideoTrackRef.current = videoSender.track;
+                await videoSender.replaceTrack(screenTrack);
+            }
+
+            setIsScreenSharing(true);
+
+            // When user stops sharing via browser UI
+            screenTrack.onended = () => {
+                stopScreenShare();
+            };
+        } catch (error) {
+            console.error('Screen share error:', error);
+        }
+    }, []);
+
+    const stopScreenShare = useCallback(() => {
+        const pc = peerConnectionRef.current;
+        if (!pc) return;
+
+        if (screenStreamRef.current) {
+            screenStreamRef.current.getTracks().forEach((t) => t.stop());
+            screenStreamRef.current = null;
+        }
+
+        // Restore original video track
+        if (originalVideoTrackRef.current) {
+            const videoSender = pc.getSenders().find(
+                (s) => s.track?.kind === 'video' || s.track === null
+            );
+            if (videoSender) {
+                videoSender.replaceTrack(originalVideoTrackRef.current);
+            }
+            originalVideoTrackRef.current = null;
+        }
+
+        setIsScreenSharing(false);
+    }, []);
+
+    // ── END CALL (writes signal to Firestore) ──
+    const endCall = useCallback(async () => {
+        try {
+            const endCallRef = doc(db, 'sessions', sessionId, 'signals', 'endCall');
+            await setDoc(endCallRef, {
+                ended: true,
+                by: userId,
+                timestamp: new Date().toISOString(),
+            });
+        } catch (e) {
+            console.error('Error signaling end call:', e);
+        }
         cleanup();
-    }, [cleanup]);
+        setIsCallEnded(true);
+        setEndedBy(userId);
+    }, [cleanup, sessionId, userId]);
+
+    // ── FLIP CAMERA (front/back for mobile) ──
+    const flipCamera = useCallback(async () => {
+        try {
+            const newFacing = isFrontCamera ? 'environment' : 'user';
+            const newStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { exact: newFacing } },
+                audio: false,
+            });
+
+            const newVideoTrack = newStream.getVideoTracks()[0];
+            // Preserve current mute state
+            newVideoTrack.enabled = !isVideoOff;
+
+            // Replace track in local stream
+            if (localStreamRef.current) {
+                const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+                if (oldVideoTrack) {
+                    localStreamRef.current.removeTrack(oldVideoTrack);
+                    oldVideoTrack.stop();
+                }
+                localStreamRef.current.addTrack(newVideoTrack);
+                setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+            }
+
+            // Replace track on peer connection sender
+            const pc = peerConnectionRef.current;
+            if (pc) {
+                const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
+                if (videoSender) {
+                    await videoSender.replaceTrack(newVideoTrack);
+                }
+            }
+
+            setIsFrontCamera(!isFrontCamera);
+        } catch (error) {
+            console.error('Flip camera error:', error);
+            // Fallback: device may not support exact facingMode, try without exact
+            try {
+                const newFacing = isFrontCamera ? 'environment' : 'user';
+                const newStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: newFacing },
+                    audio: false,
+                });
+                const newVideoTrack = newStream.getVideoTracks()[0];
+                newVideoTrack.enabled = !isVideoOff;
+
+                if (localStreamRef.current) {
+                    const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+                    if (oldVideoTrack) {
+                        localStreamRef.current.removeTrack(oldVideoTrack);
+                        oldVideoTrack.stop();
+                    }
+                    localStreamRef.current.addTrack(newVideoTrack);
+                    setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+                }
+
+                const pc = peerConnectionRef.current;
+                if (pc) {
+                    const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
+                    if (videoSender) {
+                        await videoSender.replaceTrack(newVideoTrack);
+                    }
+                }
+
+                setIsFrontCamera(!isFrontCamera);
+            } catch (fallbackError) {
+                console.error('Flip camera fallback error:', fallbackError);
+            }
+        }
+    }, [isFrontCamera, isVideoOff]);
 
     // Cleanup on unmount
     useEffect(() => {
@@ -237,9 +466,16 @@ export default function useWebRTC({
         isConnected,
         isAudioMuted,
         isVideoOff,
+        isScreenSharing,
+        isFrontCamera,
+        isCallEnded,
+        endedBy,
         toggleAudio,
         toggleVideo,
         startCall,
         endCall,
+        startScreenShare,
+        stopScreenShare,
+        flipCamera,
     };
 }

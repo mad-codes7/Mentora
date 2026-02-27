@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, use } from 'react';
+import { useState, useEffect, useCallback, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/common/AuthContext';
-import { doc, getDoc, updateDoc, Timestamp, onSnapshot } from 'firebase/firestore';
+import { doc, updateDoc, Timestamp, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import useWebRTC from '@/features/classroom/useWebRTC';
 import VideoFeed from '@/features/classroom/VideoFeed';
@@ -14,9 +14,9 @@ import SessionTimer from '@/features/classroom/SessionTimer';
 import { Session } from '@/config/types';
 import {
     Loader2, Video, Clock, UserCheck, XCircle,
-    Mic, MicOff, Camera, CameraOff, PhoneOff,
+    Mic, MicOff, Camera, CameraOff, PhoneOff, SwitchCamera,
     MessageSquare, FileText, PenTool, Hand, StickyNote,
-    MonitorUp, BookOpen, Timer, Plus, ChevronDown, Info, Shield
+    MonitorUp, MonitorOff, BookOpen, Timer, Plus, Info, Shield
 } from 'lucide-react';
 
 interface RoomPageProps {
@@ -27,7 +27,7 @@ export default function RoomPage({ params }: RoomPageProps) {
     const resolvedParams = use(params);
     const sessionId = resolvedParams.sessionId;
     const router = useRouter();
-    const { firebaseUser, loading: authLoading } = useAuth();
+    const { firebaseUser, mentoraUser, loading: authLoading } = useAuth();
 
     const [session, setSession] = useState<Session | null>(null);
     const [showChat, setShowChat] = useState(false);
@@ -53,22 +53,29 @@ export default function RoomPage({ params }: RoomPageProps) {
         isConnected,
         isAudioMuted,
         isVideoOff,
+        isScreenSharing,
+        isFrontCamera,
+        isCallEnded,
+        endedBy,
         toggleAudio,
         toggleVideo,
         startCall,
         endCall,
+        startScreenShare,
+        stopScreenShare,
+        flipCamera,
     } = useWebRTC({
         sessionId,
         userId: firebaseUser?.uid || '',
         isCaller,
     });
 
-    // Redirect if not logged in
+    // ── Redirect if not logged in ──
     useEffect(() => {
         if (!authLoading && !firebaseUser) router.push('/login');
     }, [authLoading, firebaseUser, router]);
 
-    // Subscribe to session doc
+    // ── Subscribe to session doc ──
     useEffect(() => {
         if (!firebaseUser) return;
         const unsubscribe = onSnapshot(doc(db, 'sessions', sessionId), (snap) => {
@@ -81,7 +88,7 @@ export default function RoomPage({ params }: RoomPageProps) {
         return () => unsubscribe();
     }, [sessionId, firebaseUser]);
 
-    // Listen for hand raise signals
+    // ── Listen for hand raise signals ──
     useEffect(() => {
         if (!firebaseUser) return;
         const unsubscribe = onSnapshot(
@@ -98,7 +105,32 @@ export default function RoomPage({ params }: RoomPageProps) {
         return () => unsubscribe();
     }, [sessionId, firebaseUser]);
 
-    // Waiting timer
+    // ── SYNCED END CALL: redirect both parties ──
+    useEffect(() => {
+        if (!isCallEnded || !session) return;
+
+        // Save student notes if applicable
+        const saveAndRedirect = async () => {
+            if (isStudent && notes.trim()) {
+                await updateDoc(doc(db, 'sessions', sessionId), {
+                    studentNotes: notes,
+                });
+            }
+            await updateDoc(doc(db, 'sessions', sessionId), {
+                status: 'completed',
+                endTime: Timestamp.now(),
+            });
+
+            // Small delay to show "Call ended" overlay
+            setTimeout(() => {
+                router.push(isTutor ? '/tutor/sessions' : `/post-session/${sessionId}`);
+            }, 2000);
+        };
+
+        saveAndRedirect().catch(console.error);
+    }, [isCallEnded, session, isStudent, isTutor, notes, sessionId, router]);
+
+    // ── Waiting timer ──
     useEffect(() => {
         if (callStarted) return;
         const interval = setInterval(() => setWaitingSeconds(s => s + 1), 1000);
@@ -119,18 +151,9 @@ export default function RoomPage({ params }: RoomPageProps) {
     }, [startCall]);
 
     const handleEndSession = useCallback(async () => {
+        // endCall writes to Firestore signal → both sides detect via onSnapshot
         endCall();
-        // Save student notes to session
-        if (isStudent && notes.trim()) {
-            await updateDoc(doc(db, 'sessions', sessionId), {
-                studentNotes: notes,
-            });
-        }
-        await updateDoc(doc(db, 'sessions', sessionId), {
-            status: 'completed', endTime: Timestamp.now(),
-        });
-        router.push(isTutor ? '/tutor/sessions' : `/post-session/${sessionId}`);
-    }, [endCall, sessionId, router, isTutor, isStudent, notes]);
+    }, [endCall]);
 
     const handleTimeUp = useCallback(() => handleEndSession(), [handleEndSession]);
 
@@ -145,7 +168,6 @@ export default function RoomPage({ params }: RoomPageProps) {
         const newState = !handRaised;
         setHandRaised(newState);
         try {
-            const { setDoc } = await import('firebase/firestore');
             await setDoc(doc(db, 'sessions', sessionId, 'signals', 'handRaise'), {
                 userId: firebaseUser?.uid, raised: newState, timestamp: Timestamp.now(),
             });
@@ -160,7 +182,27 @@ export default function RoomPage({ params }: RoomPageProps) {
         setShowExtendMenu(false);
     }, [session, sessionId]);
 
-    // Loading states
+    // ── CALL ENDED OVERLAY ──
+    if (isCallEnded) {
+        return (
+            <div className="flex h-screen items-center justify-center bg-slate-900">
+                <div className="text-center animate-fade-in">
+                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-500/20">
+                        <PhoneOff className="h-8 w-8 text-red-400" />
+                    </div>
+                    <h2 className="text-xl font-bold text-white mb-2">Call Ended</h2>
+                    <p className="text-sm text-slate-400">
+                        {endedBy === firebaseUser?.uid
+                            ? 'You ended the session.'
+                            : `${isTutor ? 'Student' : 'Tutor'} ended the session.`}
+                    </p>
+                    <p className="mt-3 text-xs text-slate-500 animate-pulse">Redirecting...</p>
+                </div>
+            </div>
+        );
+    }
+
+    // ── Loading states ──
     if (authLoading) {
         return <div className="flex h-screen items-center justify-center bg-slate-900"><Loader2 className="h-10 w-10 animate-spin text-blue-500" /></div>;
     }
@@ -187,6 +229,13 @@ export default function RoomPage({ params }: RoomPageProps) {
                         <span className={`mt-2 inline-block text-xs font-semibold px-3 py-1 rounded-full ${isTutor ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'}`}>
                             {isTutor ? '👨‍🏫 Tutor' : '🎒 Student'}
                         </span>
+                        {/* Media status note */}
+                        <div className="mt-4 rounded-xl bg-slate-800/60 border border-slate-700/50 p-3">
+                            <p className="text-[11px] text-slate-400">
+                                🎥 Mic & camera will be <strong className="text-emerald-400">ON</strong> when you join.
+                                <br />You can turn them off during the call.
+                            </p>
+                        </div>
                     </div>
 
                     {isTutor && (
@@ -282,7 +331,6 @@ export default function RoomPage({ params }: RoomPageProps) {
                 {startTime && (
                     <div className="flex items-center gap-2">
                         <SessionTimer durationMinutes={session.durationLimitMinutes} startTime={startTime} onTimeUp={handleTimeUp} />
-                        {/* Tutor: extend time */}
                         {isTutor && (
                             <div className="relative">
                                 <button
@@ -312,7 +360,6 @@ export default function RoomPage({ params }: RoomPageProps) {
 
                 {/* Right: Side panel toggles */}
                 <div className="flex items-center gap-1.5">
-                    {/* Hand raised indicator */}
                     {remoteHandRaised && (
                         <div className="flex items-center gap-1.5 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs text-amber-400 animate-pulse mr-2">
                             <Hand className="h-3.5 w-3.5" />
@@ -328,14 +375,12 @@ export default function RoomPage({ params }: RoomPageProps) {
                         className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 ${activeSidePanel === 'docs' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
                         <FileText className="h-3.5 w-3.5" />Docs
                     </button>
-                    {/* Student: Notes panel */}
                     {isStudent && (
                         <button onClick={() => activeSidePanel === 'notes' ? closePanels() : openPanel('notes')}
                             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 ${activeSidePanel === 'notes' ? 'bg-purple-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
                             <StickyNote className="h-3.5 w-3.5" />Notes
                         </button>
                     )}
-                    {/* Tutor: Session info panel */}
                     {isTutor && (
                         <button onClick={() => activeSidePanel === 'info' ? closePanels() : openPanel('info')}
                             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 ${activeSidePanel === 'info' ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
@@ -346,26 +391,39 @@ export default function RoomPage({ params }: RoomPageProps) {
             </div>
 
             {/* ── MAIN CONTENT ── */}
-            <div className="flex flex-1 overflow-hidden">
+            <div className="flex flex-1 min-h-0 overflow-hidden">
                 {/* Whiteboard / Main area */}
-                <div className="relative flex-1">
+                <div className="relative flex-1 overflow-hidden">
                     {showWhiteboard ? (
-                        <Whiteboard sessionId={sessionId} />
+                        <Whiteboard sessionId={sessionId} role={isTutor ? 'tutor' : 'student'} />
                     ) : (
                         <div className="flex h-full items-center justify-center bg-slate-800">
                             <p className="text-slate-500 text-sm">Whiteboard hidden</p>
                         </div>
                     )}
-                    <VideoFeed localStream={localStream} remoteStream={remoteStream} isConnected={isConnected} />
+                    <VideoFeed
+                        localStream={localStream}
+                        remoteStream={remoteStream}
+                        isConnected={isConnected}
+                        isVideoOff={isVideoOff}
+                        localLabel={isTutor ? 'You (Tutor)' : 'You (Student)'}
+                        remoteLabel={isTutor ? 'Student' : 'Tutor'}
+                    />
                 </div>
 
                 {/* Side panels */}
                 {activeSidePanel && (
-                    <div className="w-80 border-l border-slate-700 flex flex-col bg-slate-900">
+                    <div className="w-80 border-l border-slate-700 flex flex-col min-h-0 overflow-hidden bg-slate-900">
                         {activeSidePanel === 'chat' && <ChatBox sessionId={sessionId} />}
-                        {activeSidePanel === 'docs' && <DocumentViewer documents={session.sharedDocuments || []} />}
+                        {activeSidePanel === 'docs' && (
+                            <DocumentViewer
+                                sessionId={sessionId}
+                                isTutor={isTutor}
+                                isStudent={isStudent}
+                            />
+                        )}
                         {activeSidePanel === 'notes' && (
-                            <div className="flex h-full flex-col">
+                            <div className="flex flex-1 min-h-0 flex-col">
                                 <div className="border-b border-slate-700 px-4 py-3 flex items-center gap-2">
                                     <StickyNote className="h-4 w-4 text-purple-400" />
                                     <h3 className="text-sm font-semibold text-white">My Notes</h3>
@@ -374,7 +432,7 @@ export default function RoomPage({ params }: RoomPageProps) {
                                 <textarea
                                     value={notes}
                                     onChange={e => setNotes(e.target.value)}
-                                    placeholder="Take notes during the session...&#10;&#10;• Key concepts&#10;• Questions to ask&#10;• Homework reminders"
+                                    placeholder={"Take notes during the session...\n\n• Key concepts\n• Questions to ask\n• Homework reminders"}
                                     className="flex-1 resize-none bg-slate-800/50 px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none font-mono leading-relaxed"
                                 />
                                 <div className="border-t border-slate-700 px-4 py-2 flex items-center justify-between">
@@ -384,7 +442,7 @@ export default function RoomPage({ params }: RoomPageProps) {
                             </div>
                         )}
                         {activeSidePanel === 'info' && (
-                            <div className="flex h-full flex-col">
+                            <div className="flex flex-1 min-h-0 flex-col">
                                 <div className="border-b border-slate-700 px-4 py-3 flex items-center gap-2">
                                     <Shield className="h-4 w-4 text-emerald-400" />
                                     <h3 className="text-sm font-semibold text-white">Session Info</h3>
@@ -433,7 +491,7 @@ export default function RoomPage({ params }: RoomPageProps) {
             {/* ── BOTTOM CONTROLS ── */}
             <div className="border-t border-slate-700/50 bg-slate-800/90 backdrop-blur-sm px-4 py-3">
                 <div className="flex items-center justify-between max-w-4xl mx-auto">
-                    {/* Left controls: Role-specific */}
+                    {/* Left controls */}
                     <div className="flex items-center gap-2">
                         {/* Whiteboard toggle — both roles */}
                         <button onClick={() => setShowWhiteboard(!showWhiteboard)}
@@ -462,6 +520,12 @@ export default function RoomPage({ params }: RoomPageProps) {
                             title={isVideoOff ? 'Turn camera on' : 'Turn camera off'}>
                             {isVideoOff ? <CameraOff className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
                         </button>
+                        {/* Flip camera (mobile front/back) */}
+                        <button onClick={flipCamera}
+                            className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-all"
+                            title={isFrontCamera ? 'Switch to back camera' : 'Switch to front camera'}>
+                            <SwitchCamera className="h-4 w-4" />
+                        </button>
                         <button onClick={handleEndSession}
                             className="flex h-10 items-center gap-1.5 rounded-full bg-red-600 px-5 text-xs font-semibold text-white transition-all hover:bg-red-700 hover:shadow-lg"
                             title="End session">
@@ -469,20 +533,34 @@ export default function RoomPage({ params }: RoomPageProps) {
                         </button>
                     </div>
 
-                    {/* Right: Role-specific quick actions */}
+                    {/* Right: Screen share */}
                     <div className="flex items-center gap-2">
-                        {/* Tutor: Screen share button */}
                         {isTutor && (
-                            <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all"
-                                title="Screen share (coming soon)" disabled>
-                                <MonitorUp className="h-3.5 w-3.5" />Share Screen
+                            <button
+                                onClick={isScreenSharing ? stopScreenShare : startScreenShare}
+                                className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-all ${isScreenSharing
+                                    ? 'bg-blue-600 text-white ring-1 ring-blue-400/50'
+                                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                    }`}
+                            >
+                                {isScreenSharing
+                                    ? <><MonitorOff className="h-3.5 w-3.5" />Stop Sharing</>
+                                    : <><MonitorUp className="h-3.5 w-3.5" />Share Screen</>
+                                }
                             </button>
                         )}
-                        {/* Student: Screen share request */}
                         {isStudent && (
-                            <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all"
-                                title="Screen share (coming soon)" disabled>
-                                <MonitorUp className="h-3.5 w-3.5" />Share Screen
+                            <button
+                                onClick={isScreenSharing ? stopScreenShare : startScreenShare}
+                                className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-all ${isScreenSharing
+                                    ? 'bg-blue-600 text-white ring-1 ring-blue-400/50'
+                                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                    }`}
+                            >
+                                {isScreenSharing
+                                    ? <><MonitorOff className="h-3.5 w-3.5" />Stop Sharing</>
+                                    : <><MonitorUp className="h-3.5 w-3.5" />Share Screen</>
+                                }
                             </button>
                         )}
                     </div>
