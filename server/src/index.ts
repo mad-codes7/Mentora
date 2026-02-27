@@ -7,6 +7,7 @@ import tutorRoutes from './routes/tutorRoutes';
 import studentRoutes from './routes/studentRoutes';
 import parentRoutes from './routes/parentRoutes';
 import aiRoutes from './routes/aiRoutes';
+import communityRoutes from './routes/communityRoutes';
 
 
 const app = express();
@@ -30,6 +31,7 @@ app.use('/api/tutor', tutorRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/parent', parentRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/community', communityRoutes);
 
 // Start server
 app.listen(PORT, () => {

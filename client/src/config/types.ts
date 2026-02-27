@@ -190,3 +190,42 @@ export interface AnalyticsData {
     subjectBreakdown: { subject: string; count: number }[];
     monthlySessionTrend: { month: string; count: number }[];
 }
+
+// ─── Community Types ─────────────────────────────────────────
+
+export interface Community {
+    communityId: string;
+    name: string;
+    description: string;
+    subject: string;
+    tags: string[];
+    logoEmoji: string;
+    bannerColor: string;
+    createdBy: string;
+    createdByName: string;
+    createdByRole: 'student' | 'tutor';
+    memberCount: number;
+    maxMembers: number;
+    isPublic: boolean;
+    rules: string;
+    createdAt: Timestamp;
+    membership?: CommunityMember;
+}
+
+export interface CommunityMember {
+    uid: string;
+    displayName: string;
+    userRole: 'student' | 'tutor';
+    communityRole: 'owner' | 'admin' | 'member';
+    joinedAt: Timestamp;
+}
+
+export interface CommunityMessage {
+    messageId: string;
+    senderId: string;
+    senderName: string;
+    senderRole: 'student' | 'tutor';
+    text: string;
+    type: 'text' | 'announcement' | 'resource';
+    createdAt: Timestamp;
+}

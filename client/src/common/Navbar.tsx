@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useAuth } from '@/common/AuthContext';
 import { useRouter, usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { LayoutDashboard, History, ArrowLeftRight, LogOut, Bell, HelpCircle, User } from 'lucide-react';
+import { LayoutDashboard, History, ArrowLeftRight, LogOut, Bell, HelpCircle, User, Users } from 'lucide-react';
 
 export default function Navbar() {
     const { mentoraUser, signOut } = useAuth();
@@ -31,6 +31,7 @@ export default function Navbar() {
 
     const navLinks = [
         { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/community', label: 'Community', icon: Users },
         { href: '/history', label: 'History', icon: History },
         { href: '/doubts', label: 'Doubts', icon: HelpCircle },
     ];
