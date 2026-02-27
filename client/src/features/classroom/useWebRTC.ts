@@ -199,10 +199,13 @@ export default function useWebRTC({
             const pc = new RTCPeerConnection(ICE_SERVERS);
             peerConnectionRef.current = pc;
 
-            // 4) Add local tracks to peer connection
-            stream.getTracks().forEach((track) => {
-                pc.addTrack(track, stream);
-            });
+            // 4) Add local tracks to peer connection — CALLER ONLY
+            //    Callee adds tracks AFTER receiving the offer (inside onSnapshot)
+            if (isCaller) {
+                stream.getTracks().forEach((track) => {
+                    pc.addTrack(track, stream);
+                });
+            }
 
             // 5) Handle remote tracks — build a NEW MediaStream each time
             remoteStreamRef.current = new MediaStream();
@@ -261,8 +264,8 @@ export default function useWebRTC({
                     const data = snap.data();
                     if (data?.answer && !remoteDescSetRef.current) {
                         console.log('[WebRTC] Caller got answer');
-                        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
                         remoteDescSetRef.current = true;
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
                         await flushCandidates(pc);
                     }
                 });
@@ -298,8 +301,23 @@ export default function useWebRTC({
                     const data = snap.data();
                     if (data?.offer && !remoteDescSetRef.current) {
                         console.log('[WebRTC] Callee got offer');
-                        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
                         remoteDescSetRef.current = true;
+
+                        // Set remote description FIRST
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+
+                        // NOW add local tracks — this ensures they match the offer's transceivers
+                        stream.getTracks().forEach((track) => {
+                            pc.addTrack(track, stream);
+                        });
+
+                        // Ensure all transceivers are sendrecv (belt-and-suspenders)
+                        pc.getTransceivers().forEach((transceiver) => {
+                            if (transceiver.direction === 'recvonly' || transceiver.direction === 'inactive') {
+                                transceiver.direction = 'sendrecv';
+                            }
+                        });
+
                         await flushCandidates(pc);
 
                         const answer = await pc.createAnswer();
@@ -308,7 +326,7 @@ export default function useWebRTC({
                         await updateDoc(signalingRef, {
                             answer: { type: answer.type, sdp: answer.sdp },
                         });
-                        console.log('[WebRTC] Callee sent answer');
+                        console.log('[WebRTC] Callee sent answer with sendrecv');
                     }
                 });
                 unsubscribersRef.current.push(unsubOffer);
