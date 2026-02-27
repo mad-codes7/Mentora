@@ -8,6 +8,8 @@ import {
     onSnapshot,
     addDoc,
     updateDoc,
+    getDocs,
+    deleteDoc,
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 
@@ -36,10 +38,34 @@ interface UseWebRTCReturn {
     flipCamera: () => Promise<void>;
 }
 
-const ICE_SERVERS = {
+const ICE_SERVERS: RTCConfiguration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        // Free TURN servers from Open Relay Project (metered.ca free tier)
+        {
+            urls: 'turn:a.relay.metered.ca:80',
+            username: 'e8dd65b92f6aaa95c5528e18',
+            credential: '6JKtSKSoMOEaid/A',
+        },
+        {
+            urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+            username: 'e8dd65b92f6aaa95c5528e18',
+            credential: '6JKtSKSoMOEaid/A',
+        },
+        {
+            urls: 'turn:a.relay.metered.ca:443',
+            username: 'e8dd65b92f6aaa95c5528e18',
+            credential: '6JKtSKSoMOEaid/A',
+        },
+        {
+            urls: 'turns:a.relay.metered.ca:443?transport=tcp',
+            username: 'e8dd65b92f6aaa95c5528e18',
+            credential: '6JKtSKSoMOEaid/A',
+        },
     ],
 };
 
@@ -51,7 +77,6 @@ export default function useWebRTC({
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const [isConnected, setIsConnected] = useState(false);
-    // ── DEFAULT ON — media flows immediately ──
     const [isAudioMuted, setIsAudioMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -61,11 +86,18 @@ export default function useWebRTC({
 
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
+    const remoteStreamRef = useRef<MediaStream>(new MediaStream());
     const screenStreamRef = useRef<MediaStream | null>(null);
     const originalVideoTrackRef = useRef<MediaStreamTrack | null>(null);
-    const endCallUnsubRef = useRef<(() => void) | null>(null);
+    const unsubscribersRef = useRef<Array<() => void>>([]);
+    const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+    const remoteDescSetRef = useRef(false);
 
     const cleanup = useCallback(() => {
+        // Unsubscribe all Firestore listeners
+        unsubscribersRef.current.forEach((unsub) => unsub());
+        unsubscribersRef.current = [];
+
         if (peerConnectionRef.current) {
             peerConnectionRef.current.close();
             peerConnectionRef.current = null;
@@ -78,19 +110,76 @@ export default function useWebRTC({
             screenStreamRef.current.getTracks().forEach((track) => track.stop());
             screenStreamRef.current = null;
         }
-        if (endCallUnsubRef.current) {
-            endCallUnsubRef.current();
-            endCallUnsubRef.current = null;
-        }
+        remoteStreamRef.current = new MediaStream();
+        pendingCandidatesRef.current = [];
+        remoteDescSetRef.current = false;
         setLocalStream(null);
         setRemoteStream(null);
         setIsConnected(false);
         setIsScreenSharing(false);
     }, []);
 
+    // ── Helper: flush buffered ICE candidates ──
+    const flushCandidates = useCallback(async (pc: RTCPeerConnection) => {
+        const candidates = [...pendingCandidatesRef.current];
+        pendingCandidatesRef.current = [];
+        for (const c of candidates) {
+            try {
+                await pc.addIceCandidate(new RTCIceCandidate(c));
+            } catch (e) {
+                console.warn('Failed to add buffered candidate:', e);
+            }
+        }
+    }, []);
+
+    // ── Helper: add or buffer an ICE candidate ──
+    const handleRemoteCandidate = useCallback(
+        (pc: RTCPeerConnection, candidateData: RTCIceCandidateInit) => {
+            if (remoteDescSetRef.current) {
+                pc.addIceCandidate(new RTCIceCandidate(candidateData)).catch((e) =>
+                    console.warn('addIceCandidate error:', e)
+                );
+            } else {
+                pendingCandidatesRef.current.push(candidateData);
+            }
+        },
+        []
+    );
+
+    // ── Helper: clear old signaling data (caller only) ──
+    const clearSignaling = useCallback(async () => {
+        const signalingRef = doc(db, 'sessions', sessionId, 'webrtc_signaling', 'signal');
+
+        // Delete old caller candidates
+        try {
+            const callerSnap = await getDocs(
+                collection(db, 'sessions', sessionId, 'webrtc_signaling', 'signal', 'callerCandidates')
+            );
+            const deletePromises = callerSnap.docs.map((d) => deleteDoc(d.ref));
+            await Promise.all(deletePromises);
+        } catch (e) { /* ignore */ }
+
+        // Delete old callee candidates
+        try {
+            const calleeSnap = await getDocs(
+                collection(db, 'sessions', sessionId, 'webrtc_signaling', 'signal', 'calleeCandidates')
+            );
+            const deletePromises = calleeSnap.docs.map((d) => deleteDoc(d.ref));
+            await Promise.all(deletePromises);
+        } catch (e) { /* ignore */ }
+
+        // Delete old signal doc
+        try {
+            await deleteDoc(signalingRef);
+        } catch (e) { /* ignore */ }
+    }, [sessionId]);
+
+    // ═══════════════════════════════════════════
+    //  START CALL
+    // ═══════════════════════════════════════════
     const startCall = useCallback(async () => {
         try {
-            // Get user media — tracks start ENABLED so media flows immediately
+            // 1) Get user media
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: true,
                 audio: true,
@@ -101,127 +190,146 @@ export default function useWebRTC({
             setIsAudioMuted(false);
             setIsVideoOff(false);
 
-            // Create peer connection
+            // 2) Clear old signaling if caller
+            if (isCaller) {
+                await clearSignaling();
+            }
+
+            // 3) Create peer connection
             const pc = new RTCPeerConnection(ICE_SERVERS);
             peerConnectionRef.current = pc;
 
-            // Add local tracks to peer connection
+            // 4) Add local tracks to peer connection
             stream.getTracks().forEach((track) => {
                 pc.addTrack(track, stream);
             });
 
-            // Listen for remote tracks — use the stream WebRTC provides directly
+            // 5) Handle remote tracks — build a NEW MediaStream each time
+            remoteStreamRef.current = new MediaStream();
             pc.ontrack = (event) => {
-                if (event.streams && event.streams[0]) {
-                    setRemoteStream(event.streams[0]);
-                }
+                console.log('[WebRTC] ontrack fired, track kind:', event.track.kind);
+
+                // Add to our persist ref
+                remoteStreamRef.current.addTrack(event.track);
+
+                // Create a brand new MediaStream so React detects the change
+                setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+
+                // Also listen for track ending
+                event.track.onended = () => {
+                    console.log('[WebRTC] remote track ended:', event.track.kind);
+                };
             };
 
-            // Connection state
+            // 6) Connection state monitoring
             pc.onconnectionstatechange = () => {
-                if (pc.connectionState === 'connected') {
-                    setIsConnected(true);
-                } else if (
-                    pc.connectionState === 'disconnected' ||
-                    pc.connectionState === 'failed'
-                ) {
-                    setIsConnected(false);
-                }
+                console.log('[WebRTC] connectionState:', pc.connectionState);
+                setIsConnected(pc.connectionState === 'connected');
             };
 
+            pc.oniceconnectionstatechange = () => {
+                console.log('[WebRTC] iceConnectionState:', pc.iceConnectionState);
+            };
+
+            // 7) Signaling
             const signalingRef = doc(db, 'sessions', sessionId, 'webrtc_signaling', 'signal');
 
             if (isCaller) {
-                // Caller: create offer
-                const candidatesCollection = collection(
+                // ── CALLER FLOW ──
+
+                // ICE candidates → Firestore
+                const callerCandidatesCol = collection(
                     db, 'sessions', sessionId, 'webrtc_signaling', 'signal', 'callerCandidates'
                 );
-
                 pc.onicecandidate = (event) => {
                     if (event.candidate) {
-                        addDoc(candidatesCollection, event.candidate.toJSON());
+                        addDoc(callerCandidatesCol, event.candidate.toJSON());
                     }
                 };
 
-                const offerDescription = await pc.createOffer();
-                await pc.setLocalDescription(offerDescription);
+                // Create and send offer
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
 
                 await setDoc(signalingRef, {
-                    offer: {
-                        type: offerDescription.type,
-                        sdp: offerDescription.sdp,
-                    },
+                    offer: { type: offer.type, sdp: offer.sdp },
+                    callId: Date.now().toString(),
                 });
 
                 // Listen for answer
-                onSnapshot(signalingRef, (snap) => {
+                const unsubAnswer = onSnapshot(signalingRef, async (snap) => {
                     const data = snap.data();
-                    if (data?.answer && !pc.currentRemoteDescription) {
-                        const answerDescription = new RTCSessionDescription(data.answer);
-                        pc.setRemoteDescription(answerDescription);
+                    if (data?.answer && !remoteDescSetRef.current) {
+                        console.log('[WebRTC] Caller got answer');
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                        remoteDescSetRef.current = true;
+                        await flushCandidates(pc);
                     }
                 });
+                unsubscribersRef.current.push(unsubAnswer);
 
                 // Listen for callee ICE candidates
-                const calleeCandidates = collection(
+                const calleeCandidatesCol = collection(
                     db, 'sessions', sessionId, 'webrtc_signaling', 'signal', 'calleeCandidates'
                 );
-                onSnapshot(calleeCandidates, (snapshot) => {
+                const unsubCalleeCandidates = onSnapshot(calleeCandidatesCol, (snapshot) => {
                     snapshot.docChanges().forEach((change) => {
                         if (change.type === 'added') {
-                            const candidate = new RTCIceCandidate(change.doc.data());
-                            pc.addIceCandidate(candidate);
+                            handleRemoteCandidate(pc, change.doc.data() as RTCIceCandidateInit);
                         }
                     });
                 });
+                unsubscribersRef.current.push(unsubCalleeCandidates);
             } else {
-                // Callee: wait for offer, then create answer
-                const candidatesCollection = collection(
+                // ── CALLEE FLOW ──
+
+                // ICE candidates → Firestore
+                const calleeCandidatesCol = collection(
                     db, 'sessions', sessionId, 'webrtc_signaling', 'signal', 'calleeCandidates'
                 );
-
                 pc.onicecandidate = (event) => {
                     if (event.candidate) {
-                        addDoc(candidatesCollection, event.candidate.toJSON());
+                        addDoc(calleeCandidatesCol, event.candidate.toJSON());
                     }
                 };
 
-                // Listen for offer
-                onSnapshot(signalingRef, async (snap) => {
+                // Listen for offer, then create answer
+                const unsubOffer = onSnapshot(signalingRef, async (snap) => {
                     const data = snap.data();
-                    if (data?.offer && !pc.currentRemoteDescription) {
-                        const offerDescription = new RTCSessionDescription(data.offer);
-                        await pc.setRemoteDescription(offerDescription);
+                    if (data?.offer && !remoteDescSetRef.current) {
+                        console.log('[WebRTC] Callee got offer');
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                        remoteDescSetRef.current = true;
+                        await flushCandidates(pc);
 
-                        const answerDescription = await pc.createAnswer();
-                        await pc.setLocalDescription(answerDescription);
+                        const answer = await pc.createAnswer();
+                        await pc.setLocalDescription(answer);
 
                         await updateDoc(signalingRef, {
-                            answer: {
-                                type: answerDescription.type,
-                                sdp: answerDescription.sdp,
-                            },
+                            answer: { type: answer.type, sdp: answer.sdp },
                         });
+                        console.log('[WebRTC] Callee sent answer');
                     }
                 });
+                unsubscribersRef.current.push(unsubOffer);
 
                 // Listen for caller ICE candidates
-                const callerCandidates = collection(
+                const callerCandidatesCol = collection(
                     db, 'sessions', sessionId, 'webrtc_signaling', 'signal', 'callerCandidates'
                 );
-                onSnapshot(callerCandidates, (snapshot) => {
+                const unsubCallerCandidates = onSnapshot(callerCandidatesCol, (snapshot) => {
                     snapshot.docChanges().forEach((change) => {
                         if (change.type === 'added') {
-                            const candidate = new RTCIceCandidate(change.doc.data());
-                            pc.addIceCandidate(candidate);
+                            handleRemoteCandidate(pc, change.doc.data() as RTCIceCandidateInit);
                         }
                     });
                 });
+                unsubscribersRef.current.push(unsubCallerCandidates);
             }
 
-            // ── LISTEN FOR END-CALL SIGNAL ──
+            // 8) Listen for end-call signal
             const endCallRef = doc(db, 'sessions', sessionId, 'signals', 'endCall');
-            endCallUnsubRef.current = onSnapshot(endCallRef, (snap) => {
+            const unsubEndCall = onSnapshot(endCallRef, (snap) => {
                 if (snap.exists()) {
                     const data = snap.data();
                     if (data?.ended) {
@@ -231,112 +339,50 @@ export default function useWebRTC({
                     }
                 }
             });
+            unsubscribersRef.current.push(unsubEndCall);
         } catch (error) {
-            console.error('WebRTC error:', error);
+            console.error('[WebRTC] startCall error:', error);
+            alert('Could not access camera/microphone. Please allow permissions and try again.');
         }
-    }, [sessionId, isCaller, cleanup]);
+    }, [sessionId, isCaller, cleanup, clearSignaling, flushCandidates, handleRemoteCandidate]);
 
-    const toggleAudio = useCallback(async () => {
+    // ═══════════════════════════════════════════
+    //  TOGGLE AUDIO / VIDEO
+    // ═══════════════════════════════════════════
+    const toggleAudio = useCallback(() => {
         if (!localStreamRef.current) return;
-
-        const audioTracks = localStreamRef.current.getAudioTracks();
-        const liveTrack = audioTracks.find(t => t.readyState === 'live');
-
-        if (liveTrack) {
-            // Track is alive, just toggle enabled
-            liveTrack.enabled = !liveTrack.enabled;
-            setIsAudioMuted(!liveTrack.enabled);
-        } else {
-            // Track is dead or missing — re-acquire audio
-            try {
-                const newStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                const newTrack = newStream.getAudioTracks()[0];
-                newTrack.enabled = true;
-
-                // Remove old dead tracks
-                audioTracks.forEach(t => { t.stop(); localStreamRef.current!.removeTrack(t); });
-                localStreamRef.current.addTrack(newTrack);
-
-                // Replace on peer connection
-                const pc = peerConnectionRef.current;
-                if (pc) {
-                    const audioSender = pc.getSenders().find(s => s.track?.kind === 'audio' || (!s.track));
-                    if (audioSender) await audioSender.replaceTrack(newTrack);
-                    else pc.addTrack(newTrack, localStreamRef.current);
-                }
-
-                setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-                setIsAudioMuted(false);
-            } catch (err) {
-                console.error('Could not re-acquire audio:', err);
-            }
-        }
+        localStreamRef.current.getAudioTracks().forEach((track) => {
+            track.enabled = !track.enabled;
+        });
+        setIsAudioMuted((prev) => !prev);
     }, []);
 
-    const toggleVideo = useCallback(async () => {
+    const toggleVideo = useCallback(() => {
         if (!localStreamRef.current) return;
-
-        const videoTracks = localStreamRef.current.getVideoTracks();
-        const liveTrack = videoTracks.find(t => t.readyState === 'live');
-
-        if (liveTrack) {
-            // Track is alive, just toggle enabled
-            liveTrack.enabled = !liveTrack.enabled;
-            setIsVideoOff(!liveTrack.enabled);
-        } else {
-            // Track is dead or missing — re-acquire video
-            try {
-                const newStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                const newTrack = newStream.getVideoTracks()[0];
-                newTrack.enabled = true;
-
-                // Remove old dead tracks
-                videoTracks.forEach(t => { t.stop(); localStreamRef.current!.removeTrack(t); });
-                localStreamRef.current.addTrack(newTrack);
-
-                // Replace on peer connection
-                const pc = peerConnectionRef.current;
-                if (pc) {
-                    const videoSender = pc.getSenders().find(s => s.track?.kind === 'video' || (!s.track));
-                    if (videoSender) await videoSender.replaceTrack(newTrack);
-                    else pc.addTrack(newTrack, localStreamRef.current);
-                }
-
-                setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-                setIsVideoOff(false);
-            } catch (err) {
-                console.error('Could not re-acquire video:', err);
-            }
-        }
+        localStreamRef.current.getVideoTracks().forEach((track) => {
+            track.enabled = !track.enabled;
+        });
+        setIsVideoOff((prev) => !prev);
     }, []);
 
     // ── SCREEN SHARE ──
     const startScreenShare = useCallback(async () => {
         try {
-            const screenStream = await navigator.mediaDevices.getDisplayMedia({
-                video: true,
-            });
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
             screenStreamRef.current = screenStream;
 
             const screenTrack = screenStream.getVideoTracks()[0];
             const pc = peerConnectionRef.current;
             if (!pc) return;
 
-            // Find the video sender and replace track
-            const videoSender = pc.getSenders().find(
-                (s) => s.track?.kind === 'video'
-            );
+            const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
             if (videoSender && localStreamRef.current) {
                 originalVideoTrackRef.current = videoSender.track;
                 await videoSender.replaceTrack(screenTrack);
             }
 
             setIsScreenSharing(true);
-
-            // When user stops sharing via browser UI
-            screenTrack.onended = () => {
-                stopScreenShare();
-            };
+            screenTrack.onended = () => stopScreenShare();
         } catch (error) {
             console.error('Screen share error:', error);
         }
@@ -351,7 +397,6 @@ export default function useWebRTC({
             screenStreamRef.current = null;
         }
 
-        // Restore original video track
         if (originalVideoTrackRef.current) {
             const videoSender = pc.getSenders().find(
                 (s) => s.track?.kind === 'video' || s.track === null
@@ -365,7 +410,7 @@ export default function useWebRTC({
         setIsScreenSharing(false);
     }, []);
 
-    // ── END CALL (writes signal to Firestore) ──
+    // ── END CALL ──
     const endCall = useCallback(async () => {
         try {
             const endCallRef = doc(db, 'sessions', sessionId, 'signals', 'endCall');
@@ -382,20 +427,15 @@ export default function useWebRTC({
         setEndedBy(userId);
     }, [cleanup, sessionId, userId]);
 
-    // ── FLIP CAMERA (front/back for mobile) ──
+    // ── FLIP CAMERA ──
     const flipCamera = useCallback(async () => {
         try {
             const newFacing = isFrontCamera ? 'environment' : 'user';
-            const newStream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { exact: newFacing } },
-                audio: false,
-            });
-
+            const constraints = { video: { facingMode: newFacing }, audio: false };
+            const newStream = await navigator.mediaDevices.getUserMedia(constraints);
             const newVideoTrack = newStream.getVideoTracks()[0];
-            // Preserve current mute state
             newVideoTrack.enabled = !isVideoOff;
 
-            // Replace track in local stream
             if (localStreamRef.current) {
                 const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
                 if (oldVideoTrack) {
@@ -406,50 +446,15 @@ export default function useWebRTC({
                 setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
             }
 
-            // Replace track on peer connection sender
             const pc = peerConnectionRef.current;
             if (pc) {
-                const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-                if (videoSender) {
-                    await videoSender.replaceTrack(newVideoTrack);
-                }
+                const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
+                if (videoSender) await videoSender.replaceTrack(newVideoTrack);
             }
 
             setIsFrontCamera(!isFrontCamera);
         } catch (error) {
             console.error('Flip camera error:', error);
-            // Fallback: device may not support exact facingMode, try without exact
-            try {
-                const newFacing = isFrontCamera ? 'environment' : 'user';
-                const newStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: newFacing },
-                    audio: false,
-                });
-                const newVideoTrack = newStream.getVideoTracks()[0];
-                newVideoTrack.enabled = !isVideoOff;
-
-                if (localStreamRef.current) {
-                    const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
-                    if (oldVideoTrack) {
-                        localStreamRef.current.removeTrack(oldVideoTrack);
-                        oldVideoTrack.stop();
-                    }
-                    localStreamRef.current.addTrack(newVideoTrack);
-                    setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-                }
-
-                const pc = peerConnectionRef.current;
-                if (pc) {
-                    const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-                    if (videoSender) {
-                        await videoSender.replaceTrack(newVideoTrack);
-                    }
-                }
-
-                setIsFrontCamera(!isFrontCamera);
-            } catch (fallbackError) {
-                console.error('Flip camera fallback error:', fallbackError);
-            }
         }
     }, [isFrontCamera, isVideoOff]);
 
