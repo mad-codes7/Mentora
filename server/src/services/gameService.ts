@@ -35,11 +35,11 @@ export async function createGame(communityId: string, creatorUid: string, creato
             displayName: creatorName,
             totalScore: 0,
             answeredCount: 0,
-            joinedAt: FieldValue.serverTimestamp(),
+            joinedAt: new Date().toISOString(),
         }],
         rounds: [],
         currentRound: 0,
-        totalRounds: 1,  // Will be updated when game starts
+        totalRounds: 1,
         rankings: [],
         createdAt: FieldValue.serverTimestamp(),
     };
