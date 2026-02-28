@@ -7,11 +7,27 @@ import { Community, CommunityMember } from '@/config/types';
 import CommunityChat from '@/features/community/CommunityChat';
 import MemberList from '@/features/community/MemberList';
 import {
-    ArrowLeft, Users, LogOut, UserPlus, Crown, Info,
-    MessageCircle, ChevronRight, Loader2
+    ArrowLeft, Users, LogOut, UserPlus, Crown,
+    MessageCircle, ChevronRight, Loader2, Hash, Globe,
+    BookOpen, Atom, FlaskConical, Code, Calculator, Microscope,
+    Languages, History, BarChart3, Lightbulb, Palette
 } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+
+const SUBJECT_ICONS: Record<string, React.ReactNode> = {
+    'Mathematics': <Calculator className="h-6 w-6" />,
+    'Physics': <Atom className="h-6 w-6" />,
+    'Chemistry': <FlaskConical className="h-6 w-6" />,
+    'Biology': <Microscope className="h-6 w-6" />,
+    'Computer Science': <Code className="h-6 w-6" />,
+    'English': <Languages className="h-6 w-6" />,
+    'History': <History className="h-6 w-6" />,
+    'Geography': <Globe className="h-6 w-6" />,
+    'Economics': <BarChart3 className="h-6 w-6" />,
+    'General Knowledge': <Lightbulb className="h-6 w-6" />,
+    'Mixed / Other': <BookOpen className="h-6 w-6" />,
+};
 
 export default function CommunityDetailPage() {
     const { communityId } = useParams<{ communityId: string }>();
@@ -33,14 +49,10 @@ export default function CommunityDetailPage() {
             ]);
             const comData = await comRes.json();
             const memData = await memRes.json();
-
             setCommunity(comData);
             setMembers(Array.isArray(memData) ? memData : []);
-
             if (mentoraUser) {
-                const memberCheck = (Array.isArray(memData) ? memData : [])
-                    .some((m: CommunityMember) => m.uid === mentoraUser.uid);
-                setIsMember(memberCheck);
+                setIsMember((Array.isArray(memData) ? memData : []).some((m: CommunityMember) => m.uid === mentoraUser.uid));
             }
         } catch (err) {
             console.error('Failed to fetch community:', err);
@@ -60,22 +72,17 @@ export default function CommunityDetailPage() {
             await fetch(`${API}/community/${communityId}/join`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    uid: mentoraUser.uid,
-                    displayName: mentoraUser.profile.fullName,
-                    userRole,
-                }),
+                body: JSON.stringify({ uid: mentoraUser.uid, displayName: mentoraUser.profile.fullName, userRole }),
             });
             await fetchCommunity();
         } catch (err) {
-            console.error('Failed to join community:', err);
+            console.error('Failed to join:', err);
         }
         setActionLoading(false);
     };
 
     const handleLeave = async () => {
-        if (!mentoraUser) return;
-        if (!confirm('Are you sure you want to leave this community?')) return;
+        if (!mentoraUser || !confirm('Are you sure you want to leave this community?')) return;
         setActionLoading(true);
         try {
             await fetch(`${API}/community/${communityId}/leave`, {
@@ -85,7 +92,7 @@ export default function CommunityDetailPage() {
             });
             router.push('/community');
         } catch (err) {
-            console.error('Failed to leave community:', err);
+            console.error('Failed to leave:', err);
         }
         setActionLoading(false);
     };
@@ -93,7 +100,7 @@ export default function CommunityDetailPage() {
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
-                <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+                <Loader2 className="h-6 w-6 text-slate-300 animate-spin" />
             </div>
         );
     }
@@ -101,71 +108,37 @@ export default function CommunityDetailPage() {
     if (!community) {
         return (
             <div className="text-center py-20">
-                <p className="text-lg font-bold text-slate-700">Community not found</p>
-                <button onClick={() => router.push('/community')} className="btn-primary mt-4 !rounded-xl">
+                <p className="text-base font-semibold text-slate-600 mb-1">Community not found</p>
+                <p className="text-sm text-slate-400 mb-4">It may have been removed.</p>
+                <button onClick={() => router.push('/community')} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
                     Back to Communities
                 </button>
             </div>
         );
     }
 
+    const SubjectIcon = SUBJECT_ICONS[community.subject] || <BookOpen className="h-6 w-6" />;
+
     return (
         <div className="animate-fade-in-up" id="community-detail-page">
             {/* Header */}
-            <div className="card overflow-hidden mb-6">
-                {/* Banner */}
-                <div
-                    className="h-32 sm:h-40 relative overflow-hidden"
-                    style={{
-                        background: `linear-gradient(135deg, ${community.bannerColor}ee, ${community.bannerColor}88, ${community.bannerColor}44)`,
-                    }}
-                >
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
-                    <div className="absolute -bottom-6 -right-6 text-8xl opacity-15 transform rotate-12">
-                        {community.logoEmoji}
-                    </div>
-
-                    {/* Back button */}
-                    <button
-                        onClick={() => router.push('/community')}
-                        className="absolute top-4 left-4 w-9 h-9 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center text-white hover:bg-white/30 transition-all"
-                    >
-                        <ArrowLeft className="h-4 w-4" />
-                    </button>
-                </div>
-
-                {/* Info bar */}
-                <div className="p-5 -mt-8 relative">
-                    <div className="flex items-end gap-4 mb-4">
-                        {/* Logo */}
-                        <div
-                            className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-lg border-3 border-white"
-                            style={{ background: `linear-gradient(135deg, ${community.bannerColor}, ${community.bannerColor}cc)` }}
+            <div className="bg-white rounded-lg border border-slate-200 mb-5">
+                <div className="p-5">
+                    {/* Top row: back + actions */}
+                    <div className="flex items-center justify-between mb-4">
+                        <button
+                            onClick={() => router.push('/community')}
+                            className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
                         >
-                            {community.logoEmoji}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <h1 className="text-xl font-bold text-slate-900 truncate">{community.name}</h1>
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                <span className="badge badge-info">{community.subject}</span>
-                                <span className="text-xs text-slate-400 flex items-center gap-1">
-                                    <Users className="h-3 w-3" />
-                                    {community.memberCount} members
-                                </span>
-                                <span className="text-xs text-slate-400 flex items-center gap-1">
-                                    <Crown className="h-3 w-3 text-amber-500" />
-                                    {community.createdByName}
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Action button */}
-                        <div className="flex gap-2 flex-shrink-0">
+                            <ArrowLeft className="h-4 w-4" />
+                            Communities
+                        </button>
+                        <div className="flex gap-2">
                             {isMember ? (
                                 <button
                                     onClick={handleLeave}
                                     disabled={actionLoading}
-                                    className="btn-secondary flex items-center gap-1.5 !rounded-xl !py-2 !px-3 text-sm text-red-500 border-red-200 hover:bg-red-50 hover:!text-red-600 hover:!border-red-300"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 bg-red-50 rounded-md hover:bg-red-100 transition-colors disabled:opacity-50"
                                 >
                                     <LogOut className="h-3.5 w-3.5" />
                                     Leave
@@ -174,7 +147,7 @@ export default function CommunityDetailPage() {
                                 <button
                                     onClick={handleJoin}
                                     disabled={actionLoading}
-                                    className="btn-primary flex items-center gap-1.5 !rounded-xl !py-2 !px-4 text-sm"
+                                    className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50"
                                 >
                                     <UserPlus className="h-3.5 w-3.5" />
                                     Join
@@ -183,53 +156,73 @@ export default function CommunityDetailPage() {
                         </div>
                     </div>
 
-                    {/* Description */}
-                    {community.description && (
-                        <p className="text-sm text-slate-500 mb-3">{community.description}</p>
-                    )}
-
-                    {/* Tags */}
-                    {community.tags?.length > 0 && (
-                        <div className="flex gap-1.5 flex-wrap">
-                            {community.tags.map((tag) => (
-                                <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 font-medium">
-                                    {tag}
-                                </span>
-                            ))}
+                    {/* Community info */}
+                    <div className="flex items-start gap-4">
+                        <div
+                            className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0"
+                            style={{ backgroundColor: `${community.bannerColor}12`, color: community.bannerColor }}
+                        >
+                            {SubjectIcon}
                         </div>
-                    )}
+                        <div className="flex-1 min-w-0">
+                            <h1 className="text-lg font-semibold text-slate-800">{community.name}</h1>
+                            <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
+                                <span style={{ color: community.bannerColor }} className="font-medium">{community.subject}</span>
+                                <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {community.memberCount}/{community.maxMembers}</span>
+                                <span className="flex items-center gap-1"><Crown className="h-3 w-3 text-amber-500" /> {community.createdByName}</span>
+                                <span className="flex items-center gap-1"><Globe className="h-3 w-3" /> {community.isPublic ? 'Public' : 'Private'}</span>
+                            </div>
+                            {community.description && (
+                                <p className="text-sm text-slate-500 mt-2 leading-relaxed">{community.description}</p>
+                            )}
+                            {community.tags?.length > 0 && (
+                                <div className="flex gap-1.5 flex-wrap mt-2">
+                                    {community.tags.map((tag) => (
+                                        <span key={tag} className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 flex items-center gap-0.5">
+                                            <Hash className="h-2.5 w-2.5" />{tag}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Member count */}
+                        <div className="hidden sm:flex flex-col items-center bg-slate-50 rounded-lg px-5 py-3 flex-shrink-0">
+                            <p className="text-xl font-semibold text-slate-800">{community.memberCount}</p>
+                            <p className="text-[11px] text-slate-400">members</p>
+                            <div className="w-full h-1 bg-slate-200 rounded-full mt-2 overflow-hidden" style={{ width: '60px' }}>
+                                <div className="h-full rounded-full" style={{ width: `${Math.round((community.memberCount / community.maxMembers) * 100)}%`, backgroundColor: community.bannerColor }} />
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Content area: Chat + Member sidebar */}
-            <div className="flex gap-5" style={{ height: 'calc(100vh - 420px)', minHeight: '400px' }}>
-                {/* Chat panel */}
-                <div className="flex-1 card overflow-hidden flex flex-col">
-                    {/* Chat header */}
-                    <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-white/80 backdrop-blur">
+            {/* Chat + Members layout */}
+            <div className="flex gap-4" style={{ height: 'calc(100vh - 380px)', minHeight: '400px' }}>
+                {/* Chat */}
+                <div className="flex-1 bg-white rounded-lg border border-slate-200 overflow-hidden flex flex-col">
+                    <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <MessageCircle className="h-4 w-4 text-indigo-500" />
-                            <span className="text-sm font-bold text-slate-700">Chat</span>
+                            <MessageCircle className="h-4 w-4 text-slate-400" />
+                            <span className="text-sm font-medium text-slate-700">Chat</span>
                         </div>
-                        {/* Mobile members toggle */}
                         <button
                             onClick={() => setShowMembers(!showMembers)}
-                            className="lg:hidden flex items-center gap-1 text-xs text-indigo-600 font-medium"
+                            className="lg:hidden flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
                         >
                             <Users className="h-3.5 w-3.5" />
                             {members.length}
                             <ChevronRight className={`h-3 w-3 transition-transform ${showMembers ? 'rotate-90' : ''}`} />
                         </button>
                     </div>
-
-                    {/* Chat body */}
                     <div className="flex-1 min-h-0">
                         <CommunityChat communityId={communityId} isAMember={isMember} />
                     </div>
                 </div>
 
-                {/* Member Sidebar - desktop */}
-                <div className={`card overflow-y-auto w-72 flex-shrink-0 ${showMembers ? 'block' : 'hidden lg:block'}`}>
+                {/* Members sidebar */}
+                <div className={`bg-white rounded-lg border border-slate-200 overflow-y-auto w-64 flex-shrink-0 ${showMembers ? 'block' : 'hidden lg:block'}`}>
                     <MemberList members={members} currentUserId={mentoraUser?.uid} />
                 </div>
             </div>
@@ -237,11 +230,11 @@ export default function CommunityDetailPage() {
             {/* Mobile member overlay */}
             {showMembers && (
                 <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setShowMembers(false)}>
-                    <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
-                    <div className="absolute right-0 top-0 bottom-0 w-80 bg-white shadow-2xl animate-slide-right overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                    <div className="absolute inset-0 bg-black/20" />
+                    <div className="absolute right-0 top-0 bottom-0 w-72 bg-white shadow-lg animate-slide-right overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                            <span className="font-bold text-slate-900">Members</span>
-                            <button onClick={() => setShowMembers(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+                            <span className="font-medium text-slate-700">Members</span>
+                            <button onClick={() => setShowMembers(false)} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>
                         </div>
                         <MemberList members={members} currentUserId={mentoraUser?.uid} />
                     </div>

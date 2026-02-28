@@ -22,10 +22,12 @@ interface UseWebRTCOptions {
 interface UseWebRTCReturn {
     localStream: MediaStream | null;
     remoteStream: MediaStream | null;
+    screenStream: MediaStream | null;
     isConnected: boolean;
     isAudioMuted: boolean;
     isVideoOff: boolean;
     isScreenSharing: boolean;
+    remoteScreenSharing: boolean;
     isFrontCamera: boolean;
     isCallEnded: boolean;
     endedBy: string | null;
@@ -80,6 +82,8 @@ export default function useWebRTC({
     const [isAudioMuted, setIsAudioMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const [remoteScreenSharing, setRemoteScreenSharing] = useState(false);
+    const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
     const [isFrontCamera, setIsFrontCamera] = useState(true);
     const [isCallEnded, setIsCallEnded] = useState(false);
     const [endedBy, setEndedBy] = useState<string | null>(null);
@@ -110,14 +114,21 @@ export default function useWebRTC({
             screenStreamRef.current.getTracks().forEach((track) => track.stop());
             screenStreamRef.current = null;
         }
+        // Clear screen share signal in Firestore
+        try {
+            const screenShareRef = doc(db, 'sessions', sessionId, 'signals', 'screenShare');
+            setDoc(screenShareRef, { sharing: false }).catch(() => { });
+        } catch (e) { /* ignore */ }
         remoteStreamRef.current = new MediaStream();
         pendingCandidatesRef.current = [];
         remoteDescSetRef.current = false;
         setLocalStream(null);
         setRemoteStream(null);
+        setScreenStream(null);
         setIsConnected(false);
         setIsScreenSharing(false);
-    }, []);
+        setRemoteScreenSharing(false);
+    }, [sessionId]);
 
     // ── Helper: flush buffered ICE candidates ──
     const flushCandidates = useCallback(async (pc: RTCPeerConnection) => {
@@ -358,6 +369,19 @@ export default function useWebRTC({
                 }
             });
             unsubscribersRef.current.push(unsubEndCall);
+
+            // 9) Listen for screen share signal from remote peer
+            const screenShareRef = doc(db, 'sessions', sessionId, 'signals', 'screenShare');
+            const unsubScreenShare = onSnapshot(screenShareRef, (snap) => {
+                if (snap.exists()) {
+                    const data = snap.data();
+                    // Only set remoteScreenSharing if the signal is from the OTHER user
+                    if (data?.userId !== userId) {
+                        setRemoteScreenSharing(data?.sharing ?? false);
+                    }
+                }
+            });
+            unsubscribersRef.current.push(unsubScreenShare);
         } catch (error) {
             console.error('[WebRTC] startCall error:', error);
             alert('Could not access camera/microphone. Please allow permissions and try again.');
@@ -386,10 +410,11 @@ export default function useWebRTC({
     // ── SCREEN SHARE ──
     const startScreenShare = useCallback(async () => {
         try {
-            const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-            screenStreamRef.current = screenStream;
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            screenStreamRef.current = stream;
+            setScreenStream(stream);
 
-            const screenTrack = screenStream.getVideoTracks()[0];
+            const screenTrack = stream.getVideoTracks()[0];
             const pc = peerConnectionRef.current;
             if (!pc) return;
 
@@ -400,11 +425,16 @@ export default function useWebRTC({
             }
 
             setIsScreenSharing(true);
+
+            // Signal remote peer via Firestore
+            const screenShareRef = doc(db, 'sessions', sessionId, 'signals', 'screenShare');
+            await setDoc(screenShareRef, { sharing: true, userId });
+
             screenTrack.onended = () => stopScreenShare();
         } catch (error) {
             console.error('Screen share error:', error);
         }
-    }, []);
+    }, [sessionId, userId]);
 
     const stopScreenShare = useCallback(() => {
         const pc = peerConnectionRef.current;
@@ -414,6 +444,7 @@ export default function useWebRTC({
             screenStreamRef.current.getTracks().forEach((t) => t.stop());
             screenStreamRef.current = null;
         }
+        setScreenStream(null);
 
         if (originalVideoTrackRef.current) {
             const videoSender = pc.getSenders().find(
@@ -426,7 +457,11 @@ export default function useWebRTC({
         }
 
         setIsScreenSharing(false);
-    }, []);
+
+        // Clear signal in Firestore
+        const screenShareRef = doc(db, 'sessions', sessionId, 'signals', 'screenShare');
+        setDoc(screenShareRef, { sharing: false }).catch(() => { });
+    }, [sessionId]);
 
     // ── END CALL ──
     const endCall = useCallback(async () => {
@@ -486,10 +521,12 @@ export default function useWebRTC({
     return {
         localStream,
         remoteStream,
+        screenStream,
         isConnected,
         isAudioMuted,
         isVideoOff,
         isScreenSharing,
+        remoteScreenSharing,
         isFrontCamera,
         isCallEnded,
         endedBy,
