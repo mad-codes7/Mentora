@@ -15,7 +15,8 @@ import {
 import { db } from '@/config/firebase';
 import { doTagsMatch } from '@/config/subjects';
 import TutorCard from '@/features/student/TutorCard';
-import { CalendarDays, WifiOff } from 'lucide-react';
+import AskCommunityModal from '@/features/student/AskCommunityModal';
+import { CalendarDays, WifiOff, Users } from 'lucide-react';
 
 interface AvailabilitySlot {
     day: string;
@@ -51,6 +52,7 @@ function FindTutorContent() {
     const [booking, setBooking] = useState(false);
     const [bookingTutorId, setBookingTutorId] = useState<string | null>(null);
     const [searchSeconds, setSearchSeconds] = useState(0);
+    const [showCommunityModal, setShowCommunityModal] = useState(false);
 
     // All search tags = topic + doubt tags
     const searchTags = [...(topic ? [topic] : []), ...doubtTags];
@@ -325,6 +327,15 @@ function FindTutorContent() {
                         <p className="text-xs text-slate-400">
                             Checking availability & subject match... {60 - searchSeconds}s
                         </p>
+                        {/* Ask into Community button */}
+                        <button
+                            onClick={() => setShowCommunityModal(true)}
+                            className="mt-4 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm font-semibold shadow-md hover:shadow-lg hover:scale-105 transition-all"
+                        >
+                            <Users className="h-4 w-4" />
+                            Ask into Community
+                        </button>
+                        <p className="text-[11px] text-slate-300 mt-1">Post your doubt in a matching community for quick help</p>
                     </div>
                 </div>
             ) : tutors.length === 0 ? (
@@ -366,6 +377,13 @@ function FindTutorContent() {
                                 👀 View All Tutors
                             </button>
                         )}
+                        <button
+                            onClick={() => setShowCommunityModal(true)}
+                            className="w-full sm:w-auto rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 px-6 py-3 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg hover:scale-105 flex items-center justify-center gap-2"
+                        >
+                            <Users className="h-4 w-4" />
+                            Ask into Community
+                        </button>
                     </div>
                 </div>
             ) : (
@@ -462,6 +480,14 @@ function FindTutorContent() {
                     )}
                 </div>
             )}
+
+            {/* Ask into Community Modal */}
+            <AskCommunityModal
+                isOpen={showCommunityModal}
+                onClose={() => setShowCommunityModal(false)}
+                searchTags={searchTags}
+                doubtDescription={topic || doubtTags.join(', ')}
+            />
         </div>
     );
 }

@@ -1,64 +1,76 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, orderBy, limit, onSnapshot, Timestamp } from 'firebase/firestore';
-import { db } from '@/config/firebase';
 import { useAuth } from '@/common/AuthContext';
-import { CommunityMessage } from '@/config/types';
-import { Send, Megaphone, BookOpen, MessageCircle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { collection, query, orderBy, onSnapshot, addDoc, Timestamp } from 'firebase/firestore';
+import { db } from '@/config/firebase';
+import { CommunityMessage, Game } from '@/config/types';
+import { Send, Loader2, Gamepad2, Plus, Users, Play, ArrowRight } from 'lucide-react';
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
 interface CommunityChatProps {
     communityId: string;
     isAMember: boolean;
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-
 export default function CommunityChat({ communityId, isAMember }: CommunityChatProps) {
-    const { mentoraUser } = useAuth();
+    const { firebaseUser, mentoraUser } = useAuth();
+    const router = useRouter();
     const [messages, setMessages] = useState<CommunityMessage[]>([]);
-    const [newMessage, setNewMessage] = useState('');
+    const [text, setText] = useState('');
     const [sending, setSending] = useState(false);
-    const chatEndRef = useRef<HTMLDivElement>(null);
-    const chatContainerRef = useRef<HTMLDivElement>(null);
+    const [showGamesMenu, setShowGamesMenu] = useState(false);
+    const [games, setGames] = useState<Game[]>([]);
+    const [loadingGames, setLoadingGames] = useState(false);
+    const [creatingGame, setCreatingGame] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const gamesMenuRef = useRef<HTMLDivElement>(null);
 
+    // Real-time messages listener
     useEffect(() => {
         if (!communityId) return;
-        const messagesRef = collection(db, 'communities', communityId, 'messages');
-        const q = query(messagesRef, orderBy('createdAt', 'asc'), limit(100));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const msgs: CommunityMessage[] = snapshot.docs.map((doc) => ({
-                messageId: doc.id,
-                ...doc.data(),
-            })) as CommunityMessage[];
+        const q = query(
+            collection(db, 'communities', communityId, 'messages'),
+            orderBy('createdAt', 'asc')
+        );
+        const unsubscribe = onSnapshot(q, (snap) => {
+            const msgs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as CommunityMessage[];
             setMessages(msgs);
         });
         return () => unsubscribe();
     }, [communityId]);
 
     useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
+    // Close menu on outside click
+    useEffect(() => {
+        const handleClick = (e: MouseEvent) => {
+            if (gamesMenuRef.current && !gamesMenuRef.current.contains(e.target as Node)) {
+                setShowGamesMenu(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClick);
+        return () => document.removeEventListener('mousedown', handleClick);
+    }, []);
+
     const handleSend = async () => {
-        if (!newMessage.trim() || !mentoraUser || sending) return;
+        if (!text.trim() || !firebaseUser || !mentoraUser || !isAMember) return;
         setSending(true);
         try {
-            const userRole = mentoraUser.roles.includes('tutor') ? 'tutor' : 'student';
-            await fetch(`${API}/community/${communityId}/messages`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    senderId: mentoraUser.uid,
-                    senderName: mentoraUser.profile.fullName,
-                    senderRole: userRole,
-                    text: newMessage.trim(),
-                    type: 'text',
-                }),
+            await addDoc(collection(db, 'communities', communityId, 'messages'), {
+                senderId: firebaseUser.uid,
+                senderName: mentoraUser.profile?.fullName || 'User',
+                senderRole: mentoraUser.roles.includes('tutor') ? 'tutor' : 'student',
+                text: text.trim(),
+                createdAt: Timestamp.now(),
             });
-            setNewMessage('');
+            setText('');
         } catch (err) {
-            console.error('Failed to send message:', err);
+            console.error('Send failed:', err);
         }
         setSending(false);
     };
@@ -70,142 +82,258 @@ export default function CommunityChat({ communityId, isAMember }: CommunityChatP
         }
     };
 
-    const formatTime = (timestamp: Timestamp | any) => {
-        if (!timestamp) return '';
-        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp.seconds * 1000);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const fetchGames = async () => {
+        setLoadingGames(true);
+        try {
+            const res = await fetch(`${API}/game/${communityId}`);
+            if (res.ok) {
+                const { data } = await res.json();
+                setGames(data || []);
+            }
+        } catch { /* silent */ }
+        setLoadingGames(false);
     };
 
-    const formatDate = (timestamp: Timestamp | any) => {
-        if (!timestamp) return '';
-        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp.seconds * 1000);
-        const today = new Date();
-        if (date.toDateString() === today.toDateString()) return 'Today';
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const handleToggleGames = () => {
+        if (!showGamesMenu) fetchGames();
+        setShowGamesMenu(!showGamesMenu);
     };
 
-    const groupedMessages: { date: string; messages: CommunityMessage[] }[] = [];
-    messages.forEach((msg) => {
-        const dateStr = formatDate(msg.createdAt);
-        const lastGroup = groupedMessages[groupedMessages.length - 1];
-        if (lastGroup && lastGroup.date === dateStr) {
-            lastGroup.messages.push(msg);
-        } else {
-            groupedMessages.push({ date: dateStr, messages: [msg] });
+    const handleCreateGame = async () => {
+        if (!firebaseUser || !mentoraUser) return;
+        setCreatingGame(true);
+        try {
+            const res = await fetch(`${API}/game/${communityId}/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    creatorUid: firebaseUser.uid,
+                    creatorName: mentoraUser.profile?.fullName || firebaseUser.displayName,
+                }),
+            });
+            if (res.ok) {
+                const { data } = await res.json();
+                setShowGamesMenu(false);
+                router.push(`/community/${communityId}/game/${data.gameId}`);
+            }
+        } catch (err) {
+            console.error('Create game failed:', err);
         }
+        setCreatingGame(false);
+    };
+
+    const handleJoinGame = (gameId: string) => {
+        setShowGamesMenu(false);
+        router.push(`/community/${communityId}/game/${gameId}`);
+    };
+
+    // Group messages by date
+    const groupedMessages: { date: string; msgs: CommunityMessage[] }[] = [];
+    let lastDate = '';
+    (messages || []).forEach(msg => {
+        const msgDate = msg.createdAt?.toDate
+            ? msg.createdAt.toDate().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+            : typeof msg.createdAt === 'object' && 'seconds' in msg.createdAt
+                ? new Date((msg.createdAt as { seconds: number }).seconds * 1000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                : 'Today';
+
+        if (msgDate !== lastDate) {
+            groupedMessages.push({ date: msgDate, msgs: [] });
+            lastDate = msgDate;
+        }
+        groupedMessages[groupedMessages.length - 1].msgs.push(msg);
     });
 
-    const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-    const getAvatarColor = (name: string) => {
-        const colors = ['#6366F1', '#3B82F6', '#8B5CF6', '#EC4899', '#10B981', '#F59E0B', '#EF4444', '#06B6D4'];
-        return colors[name.charCodeAt(0) % colors.length];
-    };
-
     return (
-        <div className="flex flex-col h-full" id="community-chat">
-            {/* Messages */}
-            <div
-                ref={chatContainerRef}
-                className="flex-1 overflow-y-auto px-4 py-3 community-chat-scroll"
-                style={{ minHeight: 0 }}
-            >
+        <div className="flex flex-col h-full">
+            {/* Messages Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-1">
                 {messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full text-center py-12">
-                        <MessageCircle className="h-10 w-10 text-slate-200 mb-3" />
-                        <p className="text-slate-400 text-sm">No messages yet</p>
-                        <p className="text-slate-300 text-xs mt-0.5">Start the conversation!</p>
+                    <div className="flex flex-col items-center justify-center h-full text-center">
+                        <span className="text-4xl mb-2">💬</span>
+                        <p className="text-sm text-slate-400">No messages yet. Start the conversation!</p>
                     </div>
                 )}
 
-                {groupedMessages.map((group) => (
-                    <div key={group.date}>
+                {groupedMessages.map((group, gi) => (
+                    <div key={gi}>
+                        {/* Date separator */}
                         <div className="flex items-center gap-3 my-4">
-                            <div className="flex-1 h-px bg-slate-100" />
-                            <span className="text-[11px] text-slate-400 font-medium">{group.date}</span>
-                            <div className="flex-1 h-px bg-slate-100" />
+                            <div className="flex-1 h-px bg-slate-200" />
+                            <span className="text-[11px] font-medium text-slate-400 px-2">{group.date}</span>
+                            <div className="flex-1 h-px bg-slate-200" />
                         </div>
 
-                        {group.messages.map((msg) => {
-                            const isOwn = msg.senderId === mentoraUser?.uid;
+                        {group.msgs.map((msg, i) => {
+                            const isMine = msg.senderId === firebaseUser?.uid;
                             const isSystem = msg.senderId === 'system';
+                            const isGameInvite = msg.type === 'game_invite';
 
-                            if (isSystem) {
+                            if (isSystem || isGameInvite) {
                                 return (
-                                    <div key={msg.messageId} className="flex justify-center my-2">
-                                        <div className="text-[11px] text-slate-400 bg-slate-50 border border-slate-100 px-3 py-1 rounded-full flex items-center gap-1.5">
-                                            {msg.type === 'announcement' ? <Megaphone className="h-3 w-3" /> : <BookOpen className="h-3 w-3" />}
-                                            {msg.text}
+                                    <div key={i} className="flex justify-center my-3">
+                                        <div className={`rounded-xl px-4 py-2.5 text-center max-w-md ${isGameInvite
+                                                ? 'bg-gradient-to-r from-yellow-50 to-amber-50 border border-amber-200'
+                                                : 'bg-slate-50 border border-slate-100'
+                                            }`}>
+                                            <p className={`text-xs font-medium ${isGameInvite ? 'text-amber-700' : 'text-slate-500'}`}>
+                                                {msg.text}
+                                            </p>
+                                            {isGameInvite && msg.gameId && (
+                                                <button
+                                                    onClick={() => handleJoinGame(msg.gameId!)}
+                                                    className="mt-2 flex items-center gap-1 mx-auto px-3 py-1 rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600 transition-colors"
+                                                >
+                                                    <Gamepad2 className="h-3 w-3" />
+                                                    Join Game
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 );
                             }
 
                             return (
-                                <div key={msg.messageId} className={`flex mb-2.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                                    {!isOwn && (
-                                        <div
-                                            className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0 mr-2 mt-4"
-                                            style={{ backgroundColor: getAvatarColor(msg.senderName) }}
-                                        >
-                                            {getInitials(msg.senderName)}
-                                        </div>
-                                    )}
-                                    <div className={`max-w-[70%]`}>
-                                        {!isOwn && (
-                                            <div className="flex items-center gap-1.5 mb-0.5 px-1">
-                                                <span className="text-xs font-medium text-slate-600">{msg.senderName}</span>
-                                                <span className={`text-[10px] font-medium ${msg.senderRole === 'tutor' ? 'text-indigo-500' : 'text-emerald-500'}`}>
-                                                    {msg.senderRole}
+                                <div key={i} className={`flex ${isMine ? 'justify-end' : 'justify-start'} mb-2`}>
+                                    <div className={`max-w-[75%]`}>
+                                        {!isMine && (
+                                            <p className="text-[10px] font-semibold text-slate-400 mb-0.5 ml-1">
+                                                {msg.senderName}
+                                                <span className="ml-1 text-[9px] text-slate-300">
+                                                    {msg.senderRole === 'tutor' ? '🎓' : '📚'}
                                                 </span>
-                                            </div>
+                                            </p>
                                         )}
-                                        <div className={`px-3.5 py-2 rounded-xl text-[13px] leading-relaxed ${isOwn
-                                                ? 'bg-indigo-600 text-white rounded-br-sm'
-                                                : 'bg-slate-100 text-slate-700 rounded-bl-sm'
+                                        <div className={`rounded-2xl px-4 py-2.5 ${isMine
+                                                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
+                                                : 'bg-slate-100 text-slate-700'
                                             }`}>
-                                            <p className="whitespace-pre-wrap break-words">{msg.text}</p>
-                                            <span className={`text-[10px] mt-1 block text-right ${isOwn ? 'text-indigo-200' : 'text-slate-400'}`}>
-                                                {formatTime(msg.createdAt)}
-                                            </span>
+                                            <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
                                         </div>
+                                        <p className={`text-[10px] text-slate-300 mt-0.5 ${isMine ? 'text-right mr-1' : 'ml-1'}`}>
+                                            {msg.createdAt?.toDate
+                                                ? msg.createdAt.toDate().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+                                                : typeof msg.createdAt === 'object' && 'seconds' in msg.createdAt
+                                                    ? new Date((msg.createdAt as { seconds: number }).seconds * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+                                                    : ''}
+                                        </p>
                                     </div>
                                 </div>
                             );
                         })}
                     </div>
                 ))}
-                <div ref={chatEndRef} />
+                <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
+            {/* Input Area */}
             {isAMember ? (
-                <div className="border-t border-slate-100 px-4 py-3">
+                <div className="border-t border-slate-200 p-3 bg-white relative">
                     <div className="flex items-center gap-2">
+                        {/* Games Button */}
+                        <div className="relative" ref={gamesMenuRef}>
+                            <button
+                                onClick={handleToggleGames}
+                                className={`flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${showGamesMenu
+                                        ? 'bg-amber-100 text-amber-600'
+                                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                    }`}
+                                title="Speed Concept Battle"
+                            >
+                                <Gamepad2 className="h-5 w-5" />
+                            </button>
+
+                            {/* Games Dropdown */}
+                            {showGamesMenu && (
+                                <div className="absolute bottom-12 left-0 w-72 bg-white rounded-xl border border-slate-200 p-3 shadow-xl z-20">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h4 className="text-sm font-bold text-slate-700">⚡ Speed Concept Battle</h4>
+                                    </div>
+
+                                    {/* Create New Game */}
+                                    <button
+                                        onClick={handleCreateGame}
+                                        disabled={creatingGame}
+                                        className="w-full flex items-center gap-2 p-3 rounded-xl bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 text-amber-700 text-sm font-semibold hover:from-amber-100 hover:to-yellow-100 transition-all mb-3 disabled:opacity-50"
+                                    >
+                                        {creatingGame ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <Plus className="h-4 w-4" />
+                                        )}
+                                        Create New Game
+                                    </button>
+
+                                    {/* Active Games */}
+                                    {loadingGames ? (
+                                        <div className="flex justify-center py-3">
+                                            <Loader2 className="h-4 w-4 text-slate-300 animate-spin" />
+                                        </div>
+                                    ) : games.filter(g => g.status === 'lobby' || g.status === 'in_progress' || g.status === 'topic_selection').length > 0 ? (
+                                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Active Games</p>
+                                            {games
+                                                .filter(g => g.status === 'lobby' || g.status === 'in_progress' || g.status === 'topic_selection')
+                                                .map(g => (
+                                                    <button
+                                                        key={g.gameId}
+                                                        onClick={() => handleJoinGame(g.gameId)}
+                                                        className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                                                    >
+                                                        <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${g.status === 'lobby' ? 'bg-emerald-100' : 'bg-amber-100'
+                                                            }`}>
+                                                            {g.status === 'lobby' ? (
+                                                                <Users className="h-4 w-4 text-emerald-600" />
+                                                            ) : (
+                                                                <Play className="h-4 w-4 text-amber-600" />
+                                                            )}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-xs font-medium text-slate-700 truncate">
+                                                                {g.createdByName}&apos;s game
+                                                            </p>
+                                                            <p className="text-[10px] text-slate-400">
+                                                                {g.participants?.length || 0} players · {g.status === 'lobby' ? 'Waiting' : 'In Progress'}
+                                                            </p>
+                                                        </div>
+                                                        <ArrowRight className="h-3.5 w-3.5 text-slate-300" />
+                                                    </button>
+                                                ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-center text-xs text-slate-400 py-2">No active games</p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Message Input */}
                         <input
                             type="text"
-                            value={newMessage}
-                            onChange={(e) => setNewMessage(e.target.value)}
+                            value={text}
+                            onChange={(e) => setText(e.target.value)}
                             onKeyDown={handleKeyDown}
                             placeholder="Type a message..."
-                            className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 placeholder:text-slate-300 focus:outline-none focus:border-indigo-300 transition-colors"
-                            id="community-message-input"
+                            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-300 focus:outline-none focus:border-indigo-300 transition-colors"
                         />
+
+                        {/* Send Button */}
                         <button
                             onClick={handleSend}
-                            disabled={!newMessage.trim() || sending}
-                            className="h-10 w-10 rounded-lg flex items-center justify-center bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            id="community-send-btn"
+                            disabled={!text.trim() || sending}
+                            className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-sm transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <Send className="h-4 w-4" />
+                            {sending ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <Send className="h-4 w-4" />
+                            )}
                         </button>
                     </div>
                 </div>
             ) : (
-                <div className="border-t border-slate-100 px-4 py-3 text-center bg-slate-50">
-                    <p className="text-sm text-slate-400">Join the community to start chatting</p>
+                <div className="border-t border-slate-200 p-4 bg-slate-50 text-center">
+                    <p className="text-sm text-slate-400">Join this community to send messages</p>
                 </div>
             )}
         </div>

@@ -1,5 +1,6 @@
 import { adminDb } from './firebaseAdmin';
 import admin from 'firebase-admin';
+import { transferToTutorWallet, getTutorWallet } from './paymentService';
 
 // ─── Register Tutor ────────────────────────────────────────────
 
@@ -151,6 +152,17 @@ export async function updateSessionStatus(
         updatePayload.endTime = new Date().toISOString();
     }
 
+    // Auto-transfer payment to tutor wallet when session completes
+    if (status === 'completed') {
+        try {
+            await transferToTutorWallet(sessionId);
+            console.log(`[updateSessionStatus] Wallet credited for session ${sessionId}`);
+        } catch (err) {
+            console.warn(`[updateSessionStatus] Wallet transfer skipped for ${sessionId}:`, err);
+            // Don't block session completion if transfer fails (e.g. no payment record)
+        }
+    }
+
     await sessionRef.update(updatePayload);
     return { sessionId, status };
 }
@@ -183,48 +195,35 @@ export async function addDocumentToSession(
 // ─── Get Wallet Balance ────────────────────────────────────────
 
 export async function getWalletBalance(uid: string) {
-    // Get the tutor's hourly rate
-    const tutorDoc = await adminDb.collection('users').doc(uid).get();
-    const tutorHourlyRate = tutorDoc.exists ? (tutorDoc.data()?.tutorData?.hourlyRate || 200) : 200;
+    // Use the new wallet points system
+    const wallet = await getTutorWallet(uid);
 
-    const completedSnapshot = await adminDb
-        .collection('sessions')
-        .where('tutorId', '==', uid)
-        .where('status', '==', 'completed')
-        .where('paymentStatus', '==', 'success')
-        .get();
-
+    // Also get pending sessions count for display
     const pendingSnapshot = await adminDb
         .collection('sessions')
         .where('tutorId', '==', uid)
         .where('status', '==', 'in_progress')
         .get();
 
-    const transactions = completedSnapshot.docs.map((doc: admin.firestore.QueryDocumentSnapshot) => {
-        const data = doc.data();
-        const durationMins = (data.durationLimitMinutes as number) || 60;
-        const amount = Math.round(tutorHourlyRate * (durationMins / 60));
-        return {
-            sessionId: doc.id,
-            amount,
-            studentName: (data.studentName as string) || 'Student',
-            topic: data.topic as string,
-            date: (data.endTime || data.createdAt) as string,
-            status: 'completed' as const,
-        };
-    });
-
-    const totalEarnings = transactions.reduce((sum: number, t) => sum + t.amount, 0);
-    const pendingDurationMins = pendingSnapshot.docs.reduce((sum: number, d: admin.firestore.QueryDocumentSnapshot) => {
-        return sum + ((d.data().durationLimitMinutes as number) || 60);
-    }, 0);
-    const pendingAmount = Math.round(tutorHourlyRate * (pendingDurationMins / 60));
+    const completedSnapshot = await adminDb
+        .collection('sessions')
+        .where('tutorId', '==', uid)
+        .where('status', '==', 'completed')
+        .get();
 
     return {
-        totalEarnings,
-        pendingAmount,
+        // New wallet fields
+        points: wallet.points,
+        totalEarned: wallet.totalEarned,
+        totalCommission: wallet.totalCommission,
+        totalRedeemed: wallet.totalRedeemed || 0,
+        canRedeem: wallet.canRedeem,
+        minRedeemPoints: wallet.minRedeemPoints,
+        transactions: wallet.transactions,
+        // Legacy-compatible fields
+        totalEarnings: wallet.totalEarned,
+        pendingAmount: pendingSnapshot.size,
         completedSessions: completedSnapshot.size,
-        transactions,
     };
 }
 

@@ -226,6 +226,85 @@ export interface CommunityMessage {
     senderName: string;
     senderRole: 'student' | 'tutor';
     text: string;
-    type: 'text' | 'announcement' | 'resource';
+    type: 'text' | 'announcement' | 'resource' | 'game_invite';
+    createdAt: Timestamp;
+    gameId?: string;
+}
+
+// ─── Wallet Points Types ─────────────────────────────────────
+
+export interface TutorWallet {
+    points: number;
+    totalEarned: number;
+    totalCommission: number;
+    totalRedeemed: number;
+    canRedeem: boolean;
+    minRedeemPoints: number;
+    transactions: WalletPointTransaction[];
+}
+
+export interface WalletPointTransaction {
+    id: string;
+    type: 'credit' | 'redemption';
+    amount: number;
+    sessionId?: string;
+    description: string;
+    createdAt: Timestamp;
+}
+
+// ─── Game Types ──────────────────────────────────────────────
+
+export type GameStatus = 'lobby' | 'topic_selection' | 'in_progress' | 'completed';
+
+export interface GameParticipant {
+    uid: string;
+    displayName: string;
+    totalScore: number;
+    answeredCount: number;
+    joinedAt: Timestamp;
+}
+
+export interface GameResponse {
+    uid: string;
+    displayName: string;
+    answer: string;
+    timeTakenMs: number;
+    score: number;
+    isCorrect: boolean;
+}
+
+export interface GameRound {
+    roundIndex: number;
+    topicChosenBy: string;
+    topic: string;
+    question: {
+        text: string;
+        options: string[];
+        correctAnswer: string;
+    };
+    responses: GameResponse[];
+    status: 'waiting_topic' | 'active' | 'completed';
+}
+
+export interface GameRanking {
+    uid: string;
+    displayName: string;
+    avgScore: number;
+    totalScore: number;
+    rank: number;
+    worstTopic?: string;
+}
+
+export interface Game {
+    gameId: string;
+    communityId: string;
+    status: GameStatus;
+    createdBy: string;
+    createdByName: string;
+    participants: GameParticipant[];
+    rounds: GameRound[];
+    currentRound: number;
+    totalRounds: number;
+    rankings: GameRanking[];
     createdAt: Timestamp;
 }

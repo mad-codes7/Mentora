@@ -5,7 +5,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { doc, getDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/common/AuthContext';
-import { CreditCard, Lock, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { CreditCard, Lock, CheckCircle2, ShieldCheck, Building2, Wallet, ArrowRight } from 'lucide-react';
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
 function PaymentContent() {
     const searchParams = useSearchParams();
@@ -80,6 +82,7 @@ function PaymentContent() {
         setPaying(true);
 
         const stripeEnabled = process.env.NEXT_PUBLIC_STRIPE_ENABLED === 'true';
+        const amount = tutorPrice || 200;
 
         try {
             if (stripeEnabled) {
@@ -87,21 +90,28 @@ function PaymentContent() {
                 const res = await fetch('/api/create-checkout-session', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        amount: tutorPrice || 200,
-                        topic,
-                        sessionId,
-                    }),
+                    body: JSON.stringify({ amount, topic, sessionId }),
                 });
                 const data = await res.json();
                 if (data.url) {
                     window.location.href = data.url;
-                    return; // redirecting to Stripe
+                    return;
                 } else {
                     throw new Error(data.error || 'Failed to create checkout session');
                 }
             } else {
-                // Simulated payment (dev mode) — update session directly
+                // Simulated payment (dev mode) — pay to admin via our API
+                await fetch(`${API}/payment/pay`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId,
+                        studentId: firebaseUser.uid,
+                        amount,
+                    }),
+                });
+
+                // Update session status
                 await updateDoc(doc(db, 'sessions', sessionId), {
                     status: 'paid_waiting',
                     paymentStatus: 'success',
@@ -117,6 +127,10 @@ function PaymentContent() {
             setPaying(false);
         }
     };
+
+    const amount = tutorPrice || 200;
+    const commission = Math.round(amount * 0.10);
+    const tutorReceives = amount - commission;
 
     if (loading) {
         return (
@@ -135,8 +149,10 @@ function PaymentContent() {
                     </div>
                     <h2 className="text-2xl font-bold text-slate-900">Payment Successful!</h2>
                     <p className="mt-2 text-slate-400 text-sm">
-                        Your session has been confirmed. Redirecting to classroom...
+                        Your payment is held securely by Mentora Admin.
+                        Your tutor will be paid after the session.
                     </p>
+                    <p className="mt-1 text-xs text-slate-300">Redirecting to classroom...</p>
                 </div>
             </div>
         );
@@ -219,9 +235,39 @@ function PaymentContent() {
                         <div className="flex justify-between items-center">
                             <span className="font-bold text-slate-900">Total</span>
                             <span className="text-3xl font-black gradient-text">
-                                ₹{tutorPrice || 200}
+                                ₹{amount}
                             </span>
                         </div>
+                    </div>
+                </div>
+
+                {/* Payment Flow Info */}
+                <div className="rounded-2xl bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                        <Building2 className="h-4 w-4 text-indigo-600" />
+                        <span className="text-sm font-bold text-indigo-700">How Payment Works</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-600">
+                        <div className="flex items-center gap-1.5">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-600">1</span>
+                            <span>You pay ₹{amount}</span>
+                        </div>
+                        <ArrowRight className="h-3 w-3 text-slate-300" />
+                        <div className="flex items-center gap-1.5">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-600">2</span>
+                            <span>Held by Admin</span>
+                        </div>
+                        <ArrowRight className="h-3 w-3 text-slate-300" />
+                        <div className="flex items-center gap-1.5">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-600">3</span>
+                            <span>Tutor gets ₹{tutorReceives}</span>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-2">
+                        <Wallet className="h-3 w-3 text-slate-400" />
+                        <span className="text-[11px] text-slate-500">
+                            ₹{commission} platform fee · Tutor receives wallet points after session
+                        </span>
                     </div>
                 </div>
 
@@ -239,7 +285,7 @@ function PaymentContent() {
                     ) : (
                         <>
                             <Lock className="h-4 w-4" />
-                            Pay ₹{tutorPrice || 200} Securely
+                            Pay ₹{amount} Securely
                         </>
                     )}
                 </button>

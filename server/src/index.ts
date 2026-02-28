@@ -8,6 +8,9 @@ import studentRoutes from './routes/studentRoutes';
 import parentRoutes from './routes/parentRoutes';
 import aiRoutes from './routes/aiRoutes';
 import communityRoutes from './routes/communityRoutes';
+import paymentRoutes from './routes/paymentRoutes';
+import gameRoutes from './routes/gameRoutes';
+import adminRoutes from './routes/adminRoutes';
 
 
 const app = express();
@@ -32,6 +35,9 @@ app.use('/api/student', studentRoutes);
 app.use('/api/parent', parentRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/community', communityRoutes);
+app.use('/api/payment', paymentRoutes);
+app.use('/api/game', gameRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Start server
 app.listen(PORT, () => {
